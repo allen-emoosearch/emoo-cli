@@ -1,0 +1,22 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+*.whl
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Project
+.playwright-mcp/
+.claude/
+~/.emoo/
+
+# OS
+.DS_Store
+Thumbs.db
