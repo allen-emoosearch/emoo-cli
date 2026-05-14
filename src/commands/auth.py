@@ -31,6 +31,12 @@ def login(client_id, client_secret, base_url):
 
 
 @auth.command()
-def status():
+@click.pass_context
+def status(ctx):
     """查看当前 Token 状态."""
-    token_status(config.load())
+    cfg = config.load()
+    if ctx.obj.get("as_json", False):
+        import json
+        print(json.dumps(cfg, indent=2, ensure_ascii=False))
+    else:
+        token_status(cfg)
