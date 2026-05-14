@@ -53,11 +53,15 @@ def send(ctx, query, chat_id, file_list, ws_agent_key):
         body["ws_agent_key"] = ws_agent_key
 
     resp = client.post("/chat/messages", body=body)
-    inner = resp.get("data", resp)
-    if isinstance(inner, dict):
-        click.echo(f"chat_id: {inner.get('chat_id', 'N/A')}")
-        click.echo(f"message_id: {inner.get('message_id', 'N/A')}")
-        click.echo("---")
-        click.echo(inner.get("complete_response", ""))
+    as_json = ctx.obj.get("as_json", False)
+    if as_json:
+        output(resp, as_json=True)
     else:
-        output(resp)
+        inner = resp.get("data", resp)
+        if isinstance(inner, dict):
+            click.echo(f"chat_id: {inner.get('chat_id', 'N/A')}")
+            click.echo(f"message_id: {inner.get('message_id', 'N/A')}")
+            click.echo("---")
+            click.echo(inner.get("complete_response", ""))
+        else:
+            output(resp)

@@ -8,12 +8,14 @@ from rich.table import Table
 from rich.text import Text
 
 console = Console()
+# For JSON output, use plain print to avoid rich control chars in pipes
+plain_console = Console(force_terminal=False)
 
 
 def output(data: dict, as_json: bool = False) -> None:
     """Main output dispatcher."""
     if as_json:
-        console.print(json.dumps(data, indent=2, ensure_ascii=False))
+        print(json.dumps(data, indent=2, ensure_ascii=False))
     else:
         _pretty(data)
 
@@ -27,7 +29,7 @@ def _pretty(data: dict) -> None:
     elif isinstance(inner, list):
         _list(inner)
     else:
-        console.print_json(json.dumps(data, ensure_ascii=False))
+        print(json.dumps(data, indent=2, ensure_ascii=False))
 
 
 def _paginated(data: dict) -> None:
@@ -86,7 +88,7 @@ def _truncate(value, max_len: int = 200) -> str:
 def success(data: dict, as_json: bool = False) -> None:
     """Print a success response from non-list endpoints."""
     if as_json:
-        console.print(json.dumps(data, indent=2, ensure_ascii=False))
+        print(json.dumps(data, indent=2, ensure_ascii=False))
     else:
         inner = data.get("data", data)
         if isinstance(inner, dict) and len(inner) <= 10:
@@ -97,7 +99,7 @@ def success(data: dict, as_json: bool = False) -> None:
                 table.add_row(k, str(v))
             console.print(table)
         else:
-            console.print_json(json.dumps(data, ensure_ascii=False))
+            print(json.dumps(data, indent=2, ensure_ascii=False))
 
 
 def token_status(cfg: dict) -> None:
