@@ -11,6 +11,14 @@ console = Console()
 # For JSON output, use plain print to avoid rich control chars in pipes
 plain_console = Console(force_terminal=False)
 
+# Columns to prioritize in table view; others are hidden to avoid unreadable wide tables
+_PRIORITY_COLS = {
+    'id', 'app_doc_id', 'title', 'url', 'name', 'content', 'content_type',
+    'created_at', 'updated_at', 'app_created_at', 'app_updated_at',
+    'open_id', 'user_id', 'ws_username', 'ws_user_type', 'email', 'mobile_num',
+    'chat_id', 'message_id', 'complete_response',
+}
+
 
 def output(data: dict, as_json: bool = False) -> None:
     """Main output dispatcher."""
@@ -45,6 +53,9 @@ def _paginated(data: dict) -> None:
 
     if isinstance(results[0], dict):
         keys = list(results[0].keys())
+        # If many columns, only show the most useful ones to avoid unreadable wide tables
+        if len(keys) > 6:
+            keys = [k for k in keys if k in _PRIORITY_COLS]
         table = Table(title=f"共 {total} 条 (每页 {page_size}, 第 {current_page} 页)")
 
         for k in keys:
@@ -52,6 +63,9 @@ def _paginated(data: dict) -> None:
 
         for row in results:
             table.add_row(*[_truncate(row.get(k, "")) for k in keys])
+
+        if len(results[0]) > len(keys):
+            console.print("[dim](部分列已隐藏，使用 --json 查看完整数据)[/dim]")
 
         console.print(table)
 
@@ -116,6 +130,10 @@ def token_status(cfg: dict) -> None:
         table.add_row("剩余有效时间", f"{remaining}s ({remaining // 60}min)")
         table.add_row("Base URL", cfg.get("base_url", "N/A"))
         table.add_row("Default User ID", cfg.get("default_user_id", "未设置"))
+        table.add_row("", "")
+        table.add_row("需要 --user-id 的命令", "data search / get, chat, contact, message push, base")
+        table.add_row("设置默认值", "emoo auth set-default-user-id <open_id>")
+        table.add_row("环境变量", "export EMOO_USER_ID=<open_id>")
     else:
         table.add_row("状态", "未登录")
     console.print(table)

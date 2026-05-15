@@ -40,3 +40,11 @@ def status(ctx):
         print(json.dumps(cfg, indent=2, ensure_ascii=False))
     else:
         token_status(cfg)
+
+
+@auth.command()
+@click.argument("user_id")
+def set_default_user_id(user_id):
+    """设置默认 Emoo-User-Id，后续命令无需每次传 --user-id."""
+    config.set_("default_user_id", user_id)
+    click.echo(f"默认 User ID 已设置为: {user_id}")

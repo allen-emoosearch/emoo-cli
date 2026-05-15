@@ -7,7 +7,7 @@ from .commands import auth, contact, data, chat, message, base
 
 @click.group()
 @click.option("--json", "as_json", is_flag=True, help="输出原始 JSON 格式")
-@click.option("--user-id", envvar="EMOO_USER_ID", help="Emoo-User-Id header 值")
+@click.option("--user-id", envvar="EMOO_USER_ID", help="用户 open_id（可用 emoo contact list 获取）")
 @click.option("--base-url", envvar="EMOO_BASE_URL", help="API Base URL")
 @click.pass_context
 def cli(ctx, as_json, user_id, base_url):

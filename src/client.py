@@ -10,7 +10,7 @@ from . import config
 
 ERROR_CODES = {
     4083: "API Token 无效",
-    4084: "Emoo-User-Id 无效",
+    4084: "Emoo-User-Id 无效，应为 open_id（可用 emoo contact list 获取）",
     4092: "ws_agent_key 不存在",
     4044: "对话消息不能为空",
 }

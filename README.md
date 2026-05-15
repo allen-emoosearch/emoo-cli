@@ -28,12 +28,14 @@ emoo auth login --client-id <your-client-id> --client-secret <your-client-secret
 # 2. 搜索数据
 emoo --user-id <open_id> data search -k "关键词"
 
-# 3. 发送对话
-emoo --user-id <open_id> chat send -q "你好"
+# 3. 设置默认用户 ID（避免每次重复输入）
+emoo auth set-default-user-id <open_id>
 
-# 4. 设置默认用户 ID（避免每次重复输入）
-export EMOO_USER_ID=<open_id>
-emoo chat list
+# 4. 发送对话（无需 --user-id）
+emoo chat send -q "你好"
+
+# 5. 查看 Token 状态
+emoo auth status
 ```
 
 ## 认证机制
@@ -49,7 +51,7 @@ emoo chat list
 
 | 选项 | 环境变量 | 说明 |
 |------|----------|------|
-| `--user-id <id>` | `EMOO_USER_ID` | Emoo-User-Id 请求头，标识以哪个用户身份调用 API |
+| `--user-id <id>` | `EMOO_USER_ID` | Emoo-User-Id 请求头，传入用户的 open_id（可通过 `emoo contact list` 获取） |
 | `--base-url <url>` | `EMOO_BASE_URL` | API 地址，默认 `https://app.emoosearch.com/open-api/v1` |
 | `--json` | — | 输出原始 JSON（默认用 rich 表格美化输出） |
 
@@ -89,11 +91,27 @@ EMOO_CLIENT_ID=xxx EMOO_CLIENT_SECRET=yyy emoo auth login
 
 #### `emoo auth status`
 
-查看当前 Token 状态：Token 预览、剩余有效时间、Base URL、默认 User ID。
+查看当前 Token 状态：Token 预览、剩余有效时间、Base URL、默认 User ID，以及哪些命令需要 `--user-id`。
 
 ```bash
 emoo auth status
 emoo --json auth status   # JSON 格式输出
+```
+
+#### `emoo auth set-default-user-id`
+
+设置默认 Emoo-User-Id，保存到 `~/.emoo/config.json`，后续命令无需每次传 `--user-id`。
+
+| 参数 | 必填 | 说明 |
+|------|:----:|------|
+| `USER_ID` (参数) | 是 | 用户的 open_id |
+
+```bash
+emoo auth set-default-user-id open_xxx
+
+# 设置后无需 --user-id
+emoo data search -k "关键词"
+emoo chat list
 ```
 
 ---
@@ -439,8 +457,9 @@ export EMOO_CLIENT_SECRET=yyy
 ## 命令速查
 
 ```
-emoo auth login          登录获取 Token（自动保存+续期）
-emoo auth status         查看 Token 状态
+emoo auth login                 登录获取 Token（自动保存+续期）
+emoo auth status                查看 Token 状态
+emoo auth set-default-user-id   设置默认 open_id（免去每次传 --user-id）
 
 emoo contact list        获取通讯录成员（支持分页+关键词）
 emoo contact update      更新成员信息（用户名/扩展信息）
@@ -469,7 +488,8 @@ emoo base record-create  新建数据表记录
   "client_secret": "yyy",
   "access_token": "eyJ...",
   "expires_at": 1778785232,
-  "base_url": "https://app.emoosearch.com/open-api/v1"
+  "base_url": "https://app.emoosearch.com/open-api/v1",
+  "default_user_id": "open_xxx"
 }
 ```
 
