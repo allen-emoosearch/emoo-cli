@@ -166,7 +166,7 @@ emoo --user-id <id> contact update open_xxx --ext-info '{"key":"value"}'
 | `-k, --keyword` | 是 | — | 搜索关键词 |
 | `--page-size` | 否 | 20 | 每页条数（最大 100） |
 | `--current-page` | 否 | 1 | 页码（从 1 开始） |
-| `--text-format` | 否 | plain | `plain` 或 `markdown` |
+| `--text-format` | 否 | plain | `plain` 或 `markdown`（语雀 HTML） |
 | `--ws-agent-key` | 否 | — | Dify/Coze/Timus 平台需传入的 Agent Key |
 | `-f, --filter` | 否 | — | 过滤条件，JSON 字符串或 JSON 文件路径 |
 
@@ -197,7 +197,7 @@ emoo --user-id <id> data search -k "test" --json | jq '.data.results[].title'
 |------|:----:|--------|------|
 | `--page-size` | 否 | 50 | 每页条数（最大 200） |
 | `--cursor` | 否 | "" | 分页游标，空则从头开始 |
-| `--text-format` | 否 | plain | `plain` 或 `markdown` |
+| `--text-format` | 否 | plain | `plain` 或 `markdown`（语雀 HTML） |
 | `-f, --filter` | 否 | — | 过滤条件 |
 
 ```bash

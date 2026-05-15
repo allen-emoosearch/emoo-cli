@@ -14,15 +14,23 @@ def _parse_filter(ctx, param, value):
         return None
     try:
         parsed = json.loads(value)
-    except json.JSONDecodeError:
-        # Try as file path
-        try:
-            with open(value) as f:
-                parsed = json.load(f)
-        except FileNotFoundError:
-            raise click.BadParameter(f"filter 文件不存在: {value}")
-        except json.JSONDecodeError as e:
-            raise click.BadParameter(f"filter 文件 JSON 格式错误: {e}")
+    except json.JSONDecodeError as json_err:
+        # Try as file path only if value looks like a file path (starts with ./ ../ / or ~/)
+        looks_like_path = value.startswith(("./", "../", "/", "~/"))
+        if looks_like_path:
+            try:
+                with open(value) as f:
+                    parsed = json.load(f)
+            except FileNotFoundError:
+                raise click.BadParameter(f"filter 文件不存在: {value}")
+            except json.JSONDecodeError as e:
+                raise click.BadParameter(f"filter 文件 JSON 格式错误: {e}")
+        else:
+            raise click.BadParameter(
+                f"filter 不是合法 JSON 也不是已存在的文件路径\n"
+                f"  JSON 解析: {json_err}\n"
+                f"  提示: 使用文件路径请以 ./ 或 ~/ 开头"
+            )
     except Exception:
         raise click.BadParameter(f"无法解析 filter: {value}")
 
@@ -54,7 +62,7 @@ def _validate_page_size(ctx, param, value):
 @click.option("--keyword", "-k", required=True, help="搜索关键词")
 @click.option("--page-size", default=20, callback=_validate_page_size, help="每页条数 (最大100)")
 @click.option("--current-page", default=1, help="页码")
-@click.option("--text-format", type=click.Choice(["plain", "markdown"]), default="plain", help="文本格式")
+@click.option("--text-format", type=click.Choice(["plain", "markdown"]), default="plain", help="文本格式 (markdown 返回语雀 HTML)")
 @click.option("--ws-agent-key", default=None, help="Agent Key (Dify/Coze/Timus 平台需传入)")
 @click.option("--filter", "-f", "filter_conditions", callback=_parse_filter, default=None, help='过滤条件: JSON 或文件路径。合法字段: id, app_doc_id, doc_group.id, doc_group.app_group_id, app_created_at, app_updated_at, ws_app.ws_app_key。运算符: eq, neq, in, nin, gte, lte。简写: -f \'{"field":"ws_app.ws_app_key","operator":"eq","value":"KEY"}\'')
 @click.pass_context
@@ -81,7 +89,7 @@ def search(ctx, keyword, page_size, current_page, text_format, ws_agent_key, fil
 @data.command()
 @click.option("--page-size", default=50, callback=_validate_page_size, help="每页条数 (最大200)")
 @click.option("--cursor", default="", help="分页游标")
-@click.option("--text-format", type=click.Choice(["plain", "markdown"]), default="plain", help="文本格式")
+@click.option("--text-format", type=click.Choice(["plain", "markdown"]), default="plain", help="文本格式 (markdown 返回语雀 HTML)")
 @click.option("--filter", "-f", "filter_conditions", callback=_parse_filter, default=None, help='过滤条件: JSON 或文件路径。合法字段同上 search')
 @click.pass_context
 def get(ctx, page_size, cursor, text_format, filter_conditions):
