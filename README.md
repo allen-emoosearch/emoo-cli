@@ -333,7 +333,20 @@ emoo --user-id <id> base record-create --table-name "线上线索" -r ./records.
 
 ## 过滤条件语法
 
-`-f, --filter` 参数使用二维数组：
+`-f, --filter` 参数支持三种格式，CLI 会自动标准化为二维数组：
+
+```bash
+# 格式 1（简写）：单个条件对象，自动包装
+-f '{"field":"ws_app.ws_app_key","operator":"eq","value":"abc123"}'
+
+# 格式 2（简写）：条件数组（AND 逻辑），自动包装
+-f '[{"field":"ws_app.ws_app_key","operator":"eq","value":"abc123"},{"field":"app_updated_at","operator":"gte","value":"2024-01-01"}]'
+
+# 格式 3（标准）：完整二维数组
+-f '[[{"field":"ws_app.ws_app_key","operator":"eq","value":"abc123"}]]'
+```
+
+二维数组逻辑：
 - **外层数组**：OR 逻辑（满足任意一组即返回）
 - **内层数组**：AND 逻辑（需同时满足组内所有条件）
 

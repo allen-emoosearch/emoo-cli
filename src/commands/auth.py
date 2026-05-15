@@ -44,7 +44,10 @@ def status(ctx):
 
 @auth.command()
 @click.argument("user_id")
-def set_default_user_id(user_id):
+@click.option("--username", default=None, help="用户显示名称（可选，方便识别）")
+def set_default_user_id(user_id, username):
     """设置默认 Emoo-User-Id，后续命令无需每次传 --user-id."""
     config.set_("default_user_id", user_id)
-    click.echo(f"默认 User ID 已设置为: {user_id}")
+    if username:
+        config.set_("default_user_name", username)
+    click.echo(f"默认 User ID 已设置为: {user_id}" + (f" ({username})" if username else ""))

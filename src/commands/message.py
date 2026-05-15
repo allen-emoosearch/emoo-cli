@@ -25,6 +25,8 @@ def message():
 @click.pass_context
 def push(ctx, message_type, content, emoo_user_id, from_title, from_image_url, detail_link, agent_key, chat_id):
     """主动推送消息给指定用户."""
+    if len(content) > 300:
+        raise click.BadParameter("消息内容最长 300 字符")
     body = {"message_type": message_type, "content": content}
     if emoo_user_id:
         body["emoo_user_id"] = emoo_user_id

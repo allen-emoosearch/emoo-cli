@@ -1,4 +1,4 @@
-"""HTTP client with auto token management and error handling."""
+"""HTTP client with auto token management, auto-refresh, and 4083 retry."""
 
 import time
 from typing import Optional
@@ -69,36 +69,47 @@ class EmooClient:
         body = resp.json()
         code = body.get("code")
         if code != 200:
-            msg = ERROR_CODES.get(code, body.get("message", "未知错误"))
-            raise click.ClickException(f"[{code}] {msg}")
+            msg = ERROR_CODES.get(code)
+            if msg:
+                raise click.ClickException(f"[{code}] {msg}")
+            # Unknown error: expose full API response for debugging
+            detail = body.get("message", "") or body.get("error", "") or str(body)
+            raise click.ClickException(f"[{code}] 服务器错误: {detail}")
         return body
 
-    def get(self, path: str, params: Optional[dict] = None) -> dict:
+    def _request(self, method: str, path: str,
+                 params: Optional[dict] = None, body: Optional[dict] = None) -> dict:
+        """Make HTTP request, auto-refresh token on 4083 and retry once."""
         self._ensure_token()
-        resp = requests.get(
+        resp = requests.request(
+            method,
             f"{self.base_url}{path}",
             headers=self._headers(),
             params=params,
+            json=body,
             timeout=60,
         )
-        return self._handle_response(resp)
+        try:
+            return self._handle_response(resp)
+        except click.ClickException as e:
+            if "4083" in str(e):
+                self._refresh_token()
+                resp = requests.request(
+                    method,
+                    f"{self.base_url}{path}",
+                    headers=self._headers(),
+                    params=params,
+                    json=body,
+                    timeout=60,
+                )
+                return self._handle_response(resp)
+            raise
+
+    def get(self, path: str, params: Optional[dict] = None) -> dict:
+        return self._request("GET", path, params=params)
 
     def post(self, path: str, body: Optional[dict] = None) -> dict:
-        self._ensure_token()
-        resp = requests.post(
-            f"{self.base_url}{path}",
-            headers=self._headers(),
-            json=body,
-            timeout=60,
-        )
-        return self._handle_response(resp)
+        return self._request("POST", path, body=body)
 
     def put(self, path: str, body: dict | list | None = None) -> dict:
-        self._ensure_token()
-        resp = requests.put(
-            f"{self.base_url}{path}",
-            headers=self._headers(),
-            json=body,
-            timeout=60,
-        )
-        return self._handle_response(resp)
+        return self._request("PUT", path, body=body)
