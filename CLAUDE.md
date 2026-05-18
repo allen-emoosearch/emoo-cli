@@ -2,6 +2,10 @@
 
 `emoo` is a command-line tool for the EMOO OpenAPI platform. It manages auth tokens automatically.
 
+**CRITICAL:** This package is installed in non-editable mode. After any source code change,
+you MUST run `pip install --force-reinstall .` from the project root, otherwise the
+installed `emoo` command will still run the stale code.
+
 ## Prerequisites
 
 - Config stored at `~/.emoo/config.json`

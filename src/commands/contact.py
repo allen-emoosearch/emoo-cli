@@ -8,7 +8,7 @@ from ..formatters import output
 
 @click.group()
 def contact():
-    """通讯录管理."""
+    """通讯录管理 (成员列表、更新成员信息)."""
 
 
 @contact.command()

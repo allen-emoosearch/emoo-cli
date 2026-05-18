@@ -22,23 +22,37 @@ pip install -e .
 ## 快速开始
 
 ```bash
-# 1. 登录获取 Token（只需一次，Token 自动续期）
+# 方式一：API Key 登录（推荐，无需 --user-id）
+emoo auth login --api-key <your-api-key>
+
+# 方式二：OAuth2 登录（需 --user-id）
 emoo auth login --client-id <your-client-id> --client-secret <your-client-secret>
 
-# 2. 搜索数据
-emoo --user-id <open_id> data search -k "关键词"
+# 搜索数据
+emoo data search -k "关键词"
 
-# 3. 设置默认用户 ID（避免每次重复输入）
-emoo auth set-default-user-id <open_id>
-
-# 4. 发送对话（无需 --user-id）
+# 发送对话
 emoo chat send -q "你好"
 
-# 5. 查看 Token 状态
+# 查看认证状态
 emoo auth status
 ```
 
 ## 认证机制
+
+支持两种认证方式：
+
+### API Key（推荐）
+
+```bash
+emoo auth login --api-key emoo_xxx
+```
+
+- API Key 直接作为 Bearer Token，无需 Emoo-User-Id
+- 适合服务端调用、脚本自动化
+- 无过期时间，无需续期
+
+### OAuth2
 
 - **首次登录**：`emoo auth login` 将 client_id/client_secret 保存到 `~/.emoo/config.json`，同时获取 access_token（有效期 2 小时）
 - **自动续期**：每次 API 调用前检查 token，过期前 60 秒自动用保存的凭证刷新
@@ -51,13 +65,16 @@ emoo auth status
 
 | 选项 | 环境变量 | 说明 |
 |------|----------|------|
-| `--user-id <id>` | `EMOO_USER_ID` | Emoo-User-Id 请求头，传入用户的 open_id（可通过 `emoo contact list` 获取） |
+| `--user-id <id>` | `EMOO_USER_ID` | Emoo-User-Id 请求头 (OAuth2 方式必填，API Key 方式无需) |
 | `--base-url <url>` | `EMOO_BASE_URL` | API 地址，默认 `https://app.emoosearch.com/open-api/v1` |
 | `--json` | — | 输出原始 JSON（默认用 rich 表格美化输出） |
 
 ```bash
 # 全局选项放在子命令前面
-emoo --user-id open_xxx --json data search -k "test"
+emoo --json data search -k "test"
+
+# OAuth2 方式需要传 --user-id
+emoo --user-id open_xxx data search -k "test"
 
 # 或用环境变量
 export EMOO_USER_ID=open_xxx
@@ -70,28 +87,33 @@ emoo data search -k "test"
 
 #### `emoo auth login`
 
-登录并获取 API Token，凭证保存到 `~/.emoo/config.json`。
+登录并获取凭证，保存到 `~/.emoo/config.json`。支持 API Key 和 OAuth2 两种方式（二选一）。
 
 | 参数 | 必填 | 环境变量 | 说明 |
 |------|:----:|----------|------|
-| `--client-id` | 是 | `EMOO_CLIENT_ID` | 客户端 ID |
-| `--client-secret` | 是 | `EMOO_CLIENT_SECRET` | 客户端密钥（输入时隐藏） |
+| `--api-key` | 条件 | `EMOO_API_KEY` | API Key（以 `emoo_` 开头），推荐方式 |
+| `--client-id` | 条件 | `EMOO_CLIENT_ID` | OAuth2 客户端 ID |
+| `--client-secret` | 条件 | `EMOO_CLIENT_SECRET` | OAuth2 客户端密钥（输入时隐藏） |
 | `--base-url` | 否 | `EMOO_BASE_URL` | API 地址 |
 
 ```bash
-# 交互式输入（会提示输入 client-id 和 client-secret）
+# API Key 登录（推荐）
+emoo auth login --api-key emoo_xxx
+
+# OAuth2 交互式输入
 emoo auth login
 
-# 通过参数指定
+# OAuth2 通过参数指定
 emoo auth login --client-id xxx --client-secret yyy
 
 # 通过环境变量
+EMOO_API_KEY=emoo_xxx emoo auth login
 EMOO_CLIENT_ID=xxx EMOO_CLIENT_SECRET=yyy emoo auth login
 ```
 
 #### `emoo auth status`
 
-查看当前 Token 状态：Token 预览、剩余有效时间、Base URL、默认 User ID，以及哪些命令需要 `--user-id`。
+查看当前认证状态：认证方式（API Key / OAuth2）、Token 有效期、Base URL、默认 User ID。
 
 ```bash
 emoo auth status
@@ -100,7 +122,7 @@ emoo --json auth status   # JSON 格式输出
 
 #### `emoo auth set-default-user-id`
 
-设置默认 Emoo-User-Id，保存到 `~/.emoo/config.json`，后续命令无需每次传 `--user-id`。
+设置默认 Emoo-User-Id (仅 OAuth2 方式需要)，保存到 `~/.emoo/config.json`。
 
 | 参数 | 必填 | 说明 |
 |------|:----:|------|
@@ -108,10 +130,6 @@ emoo --json auth status   # JSON 格式输出
 
 ```bash
 emoo auth set-default-user-id open_xxx
-
-# 设置后无需 --user-id
-emoo data search -k "关键词"
-emoo chat list
 ```
 
 ---
@@ -164,7 +182,7 @@ emoo --user-id <id> contact update open_xxx --ext-info '{"key":"value"}'
 | 参数 | 必填 | 默认值 | 说明 |
 |------|:----:|--------|------|
 | `-k, --keyword` | 是 | — | 搜索关键词 |
-| `--page-size` | 否 | 20 | 每页条数（最大 100） |
+| `--page-size` | 否 | 20 | 每页条数（最大 200） |
 | `--current-page` | 否 | 1 | 页码（从 1 开始） |
 | `--text-format` | 否 | plain | `plain` 或 `markdown`（语雀 HTML） |
 | `--ws-agent-key` | 否 | — | Dify/Coze/Timus 平台需传入的 Agent Key |
@@ -306,9 +324,11 @@ emoo --user-id <id> message push -t agent -c "您好，这是本周工作总结"
 
 ### base — EMOO Base
 
+对数据表记录进行增删改查操作。所有命令需要 `--table-name` 或 `--table-key` 指定表。
+
 #### `emoo base record-create`
 
-新建数据表记录（开发中）。
+插入记录到数据表（最多 100 条）。
 
 | 参数 | 必填 | 说明 |
 |------|:----:|------|
@@ -318,15 +338,86 @@ emoo --user-id <id> message push -t agent -c "您好，这是本周工作总结"
 
 ```bash
 # 用表名创建
-emoo --user-id <id> base record-create --table-name "线上线索" \
+emoo base record-create --table-name "线上线索" \
   -r '[{"姓名":"张三","联系方式":"13800138000"}]'
 
 # 用 table_key 创建
-emoo --user-id <id> base record-create --table-key "lead_table" \
+emoo base record-create --table-key "lead_table" \
   -r '[{"name":"张三","phone":"13800138000"}]'
 
 # 从文件加载
-emoo --user-id <id> base record-create --table-name "线上线索" -r ./records.json
+emoo base record-create --table-name "线上线索" -r ./records.json
+```
+
+#### `emoo base record-update`
+
+更新单条记录。
+
+| 参数 | 必填 | 说明 |
+|------|:----:|------|
+| `--table-name` | 条件 | 表显示名称（与 `--table-key` 二选一） |
+| `--table-key` | 条件 | 表系统标识（与 `--table-name` 二选一） |
+| `--record-key` | 是 | 记录标识 |
+| `-f, --fields` | 是 | 需要更新的字段 JSON 对象或文件路径 |
+
+```bash
+emoo base record-update --table-name "线上线索" \
+  --record-key "rec_xxx" -f '{"姓名":"李四"}'
+```
+
+#### `emoo base record-batch-update`
+
+批量更新记录（最多 100 条）。
+
+| 参数 | 必填 | 说明 |
+|------|:----:|------|
+| `--table-name` | 条件 | 表显示名称（与 `--table-key` 二选一） |
+| `--table-key` | 条件 | 表系统标识（与 `--table-name` 二选一） |
+| `-r, --records` | 是 | 记录数组 JSON 或文件路径（每条含 `record_key` 和 `fields`，最多 100 条） |
+
+```bash
+emoo base record-batch-update --table-name "线上线索" \
+  -r '[{"record_key":"rec_xxx","fields":{"姓名":"李四"}},{"record_key":"rec_yyy","fields":{"姓名":"王五"}}]'
+```
+
+#### `emoo base record-delete`
+
+删除记录（最多 100 条）。
+
+| 参数 | 必填 | 说明 |
+|------|:----:|------|
+| `--table-name` | 条件 | 表显示名称（与 `--table-key` 二选一） |
+| `--table-key` | 条件 | 表系统标识（与 `--table-name` 二选一） |
+| `-k, --record-keys` | 是 | 记录标识数组 JSON 或文件路径（最多 100 条） |
+
+```bash
+emoo base record-delete --table-name "线上线索" \
+  -k '["rec_xxx","rec_yyy"]'
+```
+
+#### `emoo base record-list`
+
+查询记录列表。
+
+| 参数 | 必填 | 默认值 | 说明 |
+|------|:----:|--------|------|
+| `--table-name` | 条件 | — | 表显示名称（与 `--table-key` 二选一） |
+| `--table-key` | 条件 | — | 表系统标识（与 `--table-name` 二选一） |
+| `--page-size` | 否 | 20 | 每页数量（最大 100） |
+| `--current-page` | 否 | 1 | 页码 |
+| `-f, --filter` | 否 | — | 过滤条件，逗号分隔（如 `status:eq:active,score:gte:60`） |
+| `--sort` | 否 | — | 排序（如 `created_at:desc`） |
+
+```bash
+# 基本查询
+emoo base record-list --table-name "线上线索"
+
+# 带过滤和排序
+emoo base record-list --table-name "线上线索" \
+  -f "status:eq:active" --sort "created_at:desc"
+
+# 分页
+emoo base record-list --table-name "线上线索" --page-size 10 --current-page 2
 ```
 
 ---
@@ -360,7 +451,10 @@ emoo --user-id <id> base record-create --table-name "线上线索" -r ./records.
 | `doc_group.app_group_id` | 文档组在源应用中的 ID |
 | `app_updated_at` | 文档更新时间 |
 | `app_created_at` | 文档创建时间 |
+| `ws_app.id` | 应用在 EMOO 中的 ID |
+| `ws_app.app_id` | 源应用 ID |
 | `ws_app.ws_app_key` | 应用的 Ws App Key |
+| `author_ws_app_user_id` | 文档作者的用户 ID |
 
 ### 运算符
 
@@ -437,7 +531,7 @@ emoo --user-id <id> base record-create --table-name "线上线索" -r ./records.
 
 ## 错误码
 
-所有接口在 HTTP 200 响应中通过 `code` 字段返回错误码：
+### 业务错误码 (HTTP 200 + code 字段)
 
 | 错误码 | 说明 | 处理建议 |
 |:------:|------|----------|
@@ -446,6 +540,17 @@ emoo --user-id <id> base record-create --table-name "线上线索" -r ./records.
 | `4084` | Emoo-User-Id 无效 | 检查 `--user-id` 参数是否正确 |
 | `4092` | ws_agent_key 不存在 | 检查 Agent Key |
 | `4044` | 对话消息不能为空 | 检查 `-q` 参数 |
+| `4133` | 表不存在 | 检查 `--table-name` 或 `--table-key` 是否正确 |
+
+### HTTP 状态码
+
+| 状态码 | 说明 |
+|:------:|------|
+| `400` | 请求参数错误 |
+| `401` | 认证失败，检查 API Key 或重新登录 |
+| `403` | 无权限访问 |
+| `404` | 资源不存在 |
+| `500` | 服务器内部错误 |
 
 ---
 
@@ -453,16 +558,20 @@ emoo --user-id <id> base record-create --table-name "线上线索" -r ./records.
 
 | 变量 | 说明 |
 |------|------|
-| `EMOO_CLIENT_ID` | 客户端 ID（auth login 时使用） |
-| `EMOO_CLIENT_SECRET` | 客户端密钥（auth login 时使用） |
-| `EMOO_USER_ID` | 默认 Emoo-User-Id，设置后无需每次传 `--user-id` |
+| `EMOO_API_KEY` | API Key（推荐，设置后无需 `--user-id`） |
+| `EMOO_CLIENT_ID` | OAuth2 客户端 ID |
+| `EMOO_CLIENT_SECRET` | OAuth2 客户端密钥 |
+| `EMOO_USER_ID` | 默认 Emoo-User-Id（OAuth2 方式使用） |
 | `EMOO_BASE_URL` | API 地址，默认 `https://app.emoosearch.com/open-api/v1` |
 
 ```bash
-# 一次性配置所有默认值
-export EMOO_USER_ID=open_xxx
+# API Key 方式
+export EMOO_API_KEY=emoo_xxx
+
+# OAuth2 方式
 export EMOO_CLIENT_ID=xxx
 export EMOO_CLIENT_SECRET=yyy
+export EMOO_USER_ID=open_xxx
 ```
 
 ---
@@ -470,23 +579,27 @@ export EMOO_CLIENT_SECRET=yyy
 ## 命令速查
 
 ```
-emoo auth login                 登录获取 Token（自动保存+续期）
-emoo auth status                查看 Token 状态
-emoo auth set-default-user-id   设置默认 open_id（免去每次传 --user-id）
+emoo auth login [--api-key <key>]          登录 (API Key 推荐 / OAuth2)
+emoo auth status                           查看认证状态
+emoo auth set-default-user-id <open_id>    设置默认 User ID (OAuth2)
 
-emoo contact list        获取通讯录成员（支持分页+关键词）
-emoo contact update      更新成员信息（用户名/扩展信息）
+emoo contact list                          获取通讯录成员 (分页+关键词)
+emoo contact update <open_id>              更新成员信息 (用户名/扩展信息)
 
-emoo data search         搜索数据（关键词+分页+过滤+markdown）
-emoo data get            游标分页获取数据
+emoo data search -k <keyword>              搜索数据 (分页+过滤+markdown)
+emoo data get                              游标分页获取数据
 
-emoo chat list           对话列表
-emoo chat create         创建新对话
-emoo chat send           发送消息并获取 AI 回复
+emoo chat list                             对话列表
+emoo chat create [--title <title>]         创建新对话
+emoo chat send -q <query>                  发送消息并获取 AI 回复
 
-emoo message push        主动推送消息（普通/Agent）
+emoo message push -t normal|agent -c ...   主动推送消息
 
-emoo base record-create  新建数据表记录
+emoo base record-create                    新建记录
+emoo base record-update                    更新单条记录
+emoo base record-batch-update              批量更新记录
+emoo base record-delete                    删除记录
+emoo base record-list                      查询记录列表
 ```
 
 ---
@@ -495,6 +608,15 @@ emoo base record-create  新建数据表记录
 
 所有配置保存在 `~/.emoo/config.json`：
 
+**API Key 方式**（推荐）：
+```json
+{
+  "api_key": "emoo_xxx",
+  "base_url": "https://app.emoosearch.com/open-api/v1"
+}
+```
+
+**OAuth2 方式**：
 ```json
 {
   "client_id": "xxx",
@@ -506,5 +628,6 @@ emoo base record-create  新建数据表记录
 }
 ```
 
-- Token 自动管理，无需手动刷新
-- 敏感信息（client_secret）仅存储在本地
+- API Key 和 OAuth2 互斥，切换时自动清理另一种方式的凭证
+- OAuth2 Token 自动管理，无需手动刷新
+- 敏感信息仅存储在本地

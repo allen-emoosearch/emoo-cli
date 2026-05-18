@@ -8,7 +8,7 @@ from ..formatters import output, success
 
 @click.group()
 def chat():
-    """对话管理."""
+    """对话管理 (列表、创建、发送消息)."""
 
 
 @chat.command()

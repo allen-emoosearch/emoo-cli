@@ -53,3 +53,11 @@ def get_client_credentials() -> tuple[Optional[str], Optional[str]]:
 
 def get_default_user_id() -> Optional[str]:
     return load().get("default_user_id")
+
+
+def get_api_key() -> Optional[str]:
+    return load().get("api_key")
+
+
+def is_api_key_auth() -> bool:
+    return bool(load().get("api_key"))

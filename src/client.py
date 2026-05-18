@@ -15,14 +15,26 @@ ERROR_CODES = {
     4044: "对话消息不能为空",
 }
 
+HTTP_STATUS_MESSAGES = {
+    400: "请求参数错误",
+    401: "认证失败，请检查 API Key 或重新登录",
+    403: "无权限访问",
+    404: "资源不存在",
+    500: "服务器内部错误",
+}
+
 
 class EmooClient:
     def __init__(self, base_url: Optional[str] = None, user_id: Optional[str] = None):
         self.base_url = (base_url or config.get_base_url()).rstrip("/")
-        self.user_id = user_id or config.get_default_user_id()
-        self._ensure_token()
+        self._use_api_key = config.is_api_key_auth()
+        self.user_id = None if self._use_api_key else (user_id or config.get_default_user_id())
+        if not self._use_api_key:
+            self._ensure_token()
 
     def _ensure_token(self) -> None:
+        if self._use_api_key:
+            return
         token = config.get_token()
         if not token:
             self._refresh_token()
@@ -60,6 +72,8 @@ class EmooClient:
         config.save(cfg)
 
     def _headers(self) -> dict:
+        if self._use_api_key:
+            return {"Authorization": f"Bearer {config.get_api_key()}"}
         h = {"Authorization": f"Bearer {config.get_token()}"}
         if self.user_id:
             h["Emoo-User-Id"] = self.user_id
@@ -68,13 +82,16 @@ class EmooClient:
     def _handle_response(self, resp: requests.Response) -> dict:
         body = resp.json()
         code = body.get("code")
-        if code != 200:
+        if code is not None and code != 200:
             msg = ERROR_CODES.get(code)
             if msg:
                 raise click.ClickException(f"[{code}] {msg}")
-            # Unknown error: expose full API response for debugging
             detail = body.get("message", "") or body.get("error", "") or str(body)
             raise click.ClickException(f"[{code}] 服务器错误: {detail}")
+        if code is None and not resp.ok:
+            http_msg = HTTP_STATUS_MESSAGES.get(resp.status_code, f"HTTP {resp.status_code}")
+            detail = body.get("message", "") or body.get("error", "") or str(body)
+            raise click.ClickException(f"[{resp.status_code}] {http_msg}: {detail}")
         return body
 
     def _request(self, method: str, path: str,

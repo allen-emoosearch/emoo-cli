@@ -9,25 +9,45 @@ from ..formatters import token_status, output
 
 @click.group()
 def auth():
-    """鉴权管理."""
+    """鉴权管理 (登录、查看状态、设置默认用户)."""
 
 
 @auth.command()
-@click.option("--client-id", prompt=True, envvar="EMOO_CLIENT_ID", help="客户端 ID")
-@click.option("--client-secret", prompt=True, hide_input=True, envvar="EMOO_CLIENT_SECRET", help="客户端密钥")
+@click.option("--client-id", envvar="EMOO_CLIENT_ID", help="客户端 ID (OAuth2 方式)")
+@click.option("--client-secret", hide_input=True, envvar="EMOO_CLIENT_SECRET", help="客户端密钥 (OAuth2 方式)")
+@click.option("--api-key", envvar="EMOO_API_KEY", help="API Key (以 emoo_ 开头，使用 API Key 认证)")
 @click.option("--base-url", envvar="EMOO_BASE_URL", help="API Base URL")
-def login(client_id, client_secret, base_url):
-    """登录并获取 API Token."""
-    cfg = config.load()
-    cfg["client_id"] = client_id
-    cfg["client_secret"] = client_secret
-    if base_url:
-        cfg["base_url"] = base_url
-    config.save(cfg)
+def login(client_id, client_secret, api_key, base_url):
+    """登录并获取 API Token (OAuth2 或 API Key 二选一)."""
+    if api_key:
+        cfg = config.load()
+        cfg["api_key"] = api_key
+        if base_url:
+            cfg["base_url"] = base_url
+        # Clear OAuth2 credentials when switching to API Key
+        cfg.pop("client_id", None)
+        cfg.pop("client_secret", None)
+        cfg.pop("access_token", None)
+        cfg.pop("expires_at", None)
+        config.save(cfg)
+        click.echo("API Key 已保存到 ~/.emoo/config.json")
+    else:
+        if not client_id:
+            client_id = click.prompt("Client ID")
+        if not client_secret:
+            client_secret = click.prompt("Client Secret", hide_input=True)
+        cfg = config.load()
+        cfg["client_id"] = client_id
+        cfg["client_secret"] = client_secret
+        if base_url:
+            cfg["base_url"] = base_url
+        # Clear API Key when switching to OAuth2
+        cfg.pop("api_key", None)
+        config.save(cfg)
 
-    client = EmooClient(base_url=base_url)
-    click.echo("Token 获取成功，已保存到 ~/.emoo/config.json")
-    token_status(config.load())
+        client = EmooClient(base_url=base_url)
+        click.echo("Token 获取成功，已保存到 ~/.emoo/config.json")
+        token_status(config.load())
 
 
 @auth.command()

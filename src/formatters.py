@@ -174,10 +174,17 @@ def token_status(cfg: dict) -> None:
     table.add_column("Key", style="bold green")
     table.add_column("Value")
 
-    if cfg.get("access_token"):
+    if cfg.get("api_key"):
+        table.add_row("认证方式", "API Key")
+        table.add_row("API Key", cfg["api_key"][:20] + "...")
+        table.add_row("Base URL", cfg.get("base_url", "N/A"))
+        table.add_row("", "")
+        table.add_row("说明", "API Key 认证无需 --user-id，直接调用即可")
+    elif cfg.get("access_token"):
         import time
         expires = cfg.get("expires_at", 0)
         remaining = max(0, int(expires - time.time()))
+        table.add_row("认证方式", "OAuth2")
         table.add_row("Token", cfg["access_token"][:20] + "...")
         table.add_row("剩余有效时间", f"{remaining}s ({remaining // 60}min)")
         table.add_row("Base URL", cfg.get("base_url", "N/A"))

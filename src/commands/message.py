@@ -10,7 +10,7 @@ from ..formatters import success
 
 @click.group()
 def message():
-    """消息推送."""
+    """消息推送 (普通通知、Agent 主动推送)."""
 
 
 @message.command()

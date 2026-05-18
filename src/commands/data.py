@@ -49,7 +49,7 @@ def _parse_filter(ctx, param, value):
 
 @click.group()
 def data():
-    """数据搜索与获取."""
+    """数据搜索与获取 (关键词搜索、游标分页、过滤排序)."""
 
 
 def _validate_page_size(ctx, param, value):
@@ -60,16 +60,25 @@ def _validate_page_size(ctx, param, value):
 
 @data.command()
 @click.option("--keyword", "-k", required=True, help="搜索关键词")
-@click.option("--page-size", default=20, callback=_validate_page_size, help="每页条数 (最大100)")
+@click.option("--page-size", default=20, callback=_validate_page_size, help="每页条数 (最大200)")
 @click.option("--current-page", default=1, help="页码")
 @click.option("--text-format", type=click.Choice(["plain", "markdown"]), default="plain", help="文本格式 (markdown 返回语雀 HTML)")
 @click.option("--ws-agent-key", default=None, help="Agent Key (Dify/Coze/Timus 平台需传入)")
-@click.option("--filter", "-f", "filter_conditions", callback=_parse_filter, default=None, help='过滤条件: JSON 或文件路径。合法字段: id, app_doc_id, doc_group.id, doc_group.app_group_id, app_created_at, app_updated_at, ws_app.ws_app_key。运算符: eq, neq, in, nin, gte, lte。简写: -f \'{"field":"ws_app.ws_app_key","operator":"eq","value":"KEY"}\'')
+@click.option("--filter", "-f", "filter_conditions", callback=_parse_filter, default=None,
+              help='过滤条件，四种格式:\n'
+                   '  ① dict: \'{"field":"...","operator":"eq","value":"..."}\'\n'
+                   '  ② 一维数组(AND): \'[{...},{...}]\'\n'
+                   '  ③ 二维数组(OR+AND): \'[[{...}],[{...}]]\'\n'
+                   '  ④ 文件路径: ./filter.json\n'
+                   '合法字段: id, app_doc_id, doc_group.id, doc_group.app_group_id, '
+                   'app_created_at, app_updated_at, ws_app.id, ws_app.app_id, '
+                   'ws_app.ws_app_key, author_ws_app_user_id\n'
+                   '运算符: eq, neq, in, nin, gte, lte')
 @click.pass_context
 def search(ctx, keyword, page_size, current_page, text_format, ws_agent_key, filter_conditions):
     """搜索数据."""
-    if page_size > 100:
-        raise click.BadParameter(f"page-size 最大 100，当前为 {page_size}")
+    if page_size > 200:
+        raise click.BadParameter(f"page-size 最大 200，当前为 {page_size}")
     body = {
         "page_size": page_size,
         "current_page": current_page,
@@ -90,7 +99,8 @@ def search(ctx, keyword, page_size, current_page, text_format, ws_agent_key, fil
 @click.option("--page-size", default=50, callback=_validate_page_size, help="每页条数 (最大200)")
 @click.option("--cursor", default="", help="分页游标")
 @click.option("--text-format", type=click.Choice(["plain", "markdown"]), default="plain", help="文本格式 (markdown 返回语雀 HTML)")
-@click.option("--filter", "-f", "filter_conditions", callback=_parse_filter, default=None, help='过滤条件: JSON 或文件路径。合法字段同上 search')
+@click.option("--filter", "-f", "filter_conditions", callback=_parse_filter, default=None,
+              help='过滤条件，四种格式同上 search')
 @click.pass_context
 def get(ctx, page_size, cursor, text_format, filter_conditions):
     """获取数据 (游标分页)."""
