@@ -422,6 +422,41 @@ emoo base record-list --table-name "线上线索" --page-size 10 --current-page 
 
 ---
 
+### app — 应用概览
+
+浏览工作区中所有已连接的应用（ws_app_key），生成知识地图方便搜索前定位数据源。
+
+#### `emoo app overview`
+
+遍历文档，按 ws_app_key 分组生成 markdown 知识地图，列出每个应用的文档数和示例内容。
+
+| 参数 | 必填 | 默认值 | 说明 |
+|------|:----:|--------|------|
+| `--max-docs` | 否 | 500 | 扫描文档上限 |
+| `-o, --output-file` | 否 | `emoo_knowledge_map.md` | 输出 Markdown 文件路径 |
+
+```bash
+# 生成知识地图 (默认扫描 500 篇)
+emoo app overview
+
+# 指定扫描上限和输出路径
+emoo app overview --max-docs 1000 -o my_knowledge_map.md
+```
+
+输出文件包含：快速索引表、各应用详情（ws_app_key、平台、文档数、示例文档）、过滤搜索建议。
+
+#### `emoo app list`
+
+快速列出所有 ws_app_key 及所属平台，无需生成完整知识地图。
+
+```bash
+emoo app list
+```
+
+> **ws_agent_key** 需在 EMOO 管理后台 → Agent 管理 → 复制 Agent Key，API 暂无对应查询端点。
+
+---
+
 ## 过滤条件语法
 
 `-f, --filter` 参数支持三种格式，CLI 会自动标准化为二维数组：
@@ -582,6 +617,9 @@ export EMOO_USER_ID=open_xxx
 emoo auth login [--api-key <key>]          登录 (API Key 推荐 / OAuth2)
 emoo auth status                           查看认证状态
 emoo auth set-default-user-id <open_id>    设置默认 User ID (OAuth2)
+
+emoo app overview                          遍历文档生成知识地图
+emoo app list                              列出所有 ws_app_key
 
 emoo contact list                          获取通讯录成员 (分页+关键词)
 emoo contact update <open_id>              更新成员信息 (用户名/扩展信息)
