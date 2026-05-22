@@ -8,6 +8,11 @@ import click
 
 from ..client import EmooClient
 from ..formatters import output
+
+
+def _progress(msg: str, **kwargs) -> None:
+    """Write progress/info to stderr so stdout stays clean for JSON consumers."""
+    click.echo(msg, err=True, **kwargs)
 from ..skills import generate_knowledge_map, analyze_intent, execute_search_plan
 from ..skills.search import export_results_csv
 from ..skills.loader import (
@@ -265,7 +270,7 @@ def run(ctx, name, csv_path, max_results, km_path):
 
     client = EmooClient(base_url=ctx.obj.get("base_url"), user_id=ctx.obj.get("user_id"))
 
-    click.echo(f"执行 skill: {sd.name}")
+    _progress(f"执行 skill: {sd.name}")
 
     outcome = run_skill(client, sd, params, knowledge_map_path=km_path, max_results=max_results)
 
@@ -304,12 +309,11 @@ def run(ctx, name, csv_path, max_results, km_path):
 
     if csv_path:
         path = export_skill_csv(outcome, csv_path)
-        click.echo(f"CSV 已导出: {path}")
+        _progress(f"CSV 已导出: {path}")
     elif sd.csv_export:
-        # Auto-export if skill has csv_export: true
         csv_name = f"{sd.name}_{outcome['keyword'][:20]}.csv"
         path = export_skill_csv(outcome, csv_name)
-        click.echo(f"CSV 已自动导出: {path}")
+        _progress(f"CSV 已自动导出: {path}")
 
 
 # ── create ──────────────────────────────────────────────────────────────────
@@ -386,7 +390,7 @@ def knowledge_map(ctx, max_sample_per_group, max_doc_groups, output_dir):
     """
     client = EmooClient(base_url=ctx.obj.get("base_url"), user_id=ctx.obj.get("user_id"))
 
-    click.echo("正在扫描工作区应用...")
+    _progress("正在扫描工作区应用...")
     json_path = generate_knowledge_map(
         client,
         max_sample_per_group=max_sample_per_group,
@@ -401,12 +405,12 @@ def knowledge_map(ctx, max_sample_per_group, max_doc_groups, output_dir):
     total_docs = sum(a.get("doc_count", 0) for a in apps)
     total_groups = sum(len(a.get("doc_groups", [])) for a in apps)
 
-    click.echo(f"\n知识图谱已生成:")
-    click.echo(f"  JSON: {os.path.abspath(json_path)}")
-    click.echo(f"  MD:   {os.path.abspath(os.path.join(output_dir, 'emoo_knowledge_map.md'))}")
-    click.echo(f"  应用数: {len(apps)}")
-    click.echo(f"  文档组数: {total_groups}")
-    click.echo(f"  文档总数: {total_docs}")
+    _progress(f"\n知识图谱已生成:")
+    _progress(f"  JSON: {os.path.abspath(json_path)}")
+    _progress(f"  MD:   {os.path.abspath(os.path.join(output_dir, 'emoo_knowledge_map.md'))}")
+    _progress(f"  应用数: {len(apps)}")
+    _progress(f"  文档组数: {total_groups}")
+    _progress(f"  文档总数: {total_docs}")
 
     if ctx.obj.get("as_json"):
         click.echo(json.dumps(km, ensure_ascii=False, indent=2))
@@ -514,7 +518,7 @@ def intent(ctx, query, km_path, top, output_file):
         result["plan"] = plan
         with open(output_file, "w", encoding="utf-8") as f:
             json.dump(result, f, ensure_ascii=False, indent=2)
-        click.echo(f"\n搜索方案已保存: {output_file}")
+        _progress(f"\n搜索方案已保存: {output_file}")
 
 
 @pipeline.command()
@@ -546,11 +550,11 @@ def search(ctx, plan_file, step, max_per_step, csv_path):
 
     client = EmooClient(base_url=ctx.obj.get("base_url"), user_id=ctx.obj.get("user_id"))
 
-    click.echo(f"意图: {plan.get('intent', 'N/A')}")
+    _progress(f"意图: {plan.get('intent', 'N/A')}")
     steps = plan.get("plan", [])
     if step is not None:
         steps = [s for s in steps if s.get("step") == step]
-    click.echo(f"执行 {len(steps)} 个搜索步骤...")
+    _progress(f"执行 {len(steps)} 个搜索步骤...")
 
     outcome = execute_search_plan(client, plan, step=step, max_per_step=max_per_step)
 
@@ -590,4 +594,4 @@ def search(ctx, plan_file, step, max_per_step, csv_path):
 
     if csv_path:
         path = export_results_csv(outcome, csv_path)
-        click.echo(f"CSV 已导出: {path}")
+        _progress(f"CSV 已导出: {path}")

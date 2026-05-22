@@ -8,6 +8,11 @@ import click
 from ..client import EmooClient
 
 
+def _progress(msg: str, **kwargs) -> None:
+    """Write progress/info to stderr so stdout stays clean for JSON consumers."""
+    click.echo(msg, err=True, **kwargs)
+
+
 @click.group()
 @click.pass_context
 def app(ctx):
@@ -28,7 +33,7 @@ def overview(ctx, max_docs, output_file):
     cursor = ""
     page_size = 200
 
-    click.echo(f"正在扫描文档 (每页 {page_size}, 上限 {max_docs})...")
+    _progress(f"正在扫描文档 (每页 {page_size}, 上限 {max_docs})...")
 
     while total < max_docs:
         resp = client.post("/data", body={
@@ -54,13 +59,13 @@ def overview(ctx, max_docs, output_file):
                 })
 
         total += len(results)
-        click.echo(f"  已扫描 {total} 篇...")
+        _progress(f"  已扫描 {total} 篇...")
 
         if not inner.get("has_more") or not inner.get("next_cursor"):
             break
         cursor = inner["next_cursor"]
 
-    click.echo(f"\n扫描完成: 共 {total} 篇文档, {len(app_docs)} 个 ws_app_key")
+    _progress(f"\n扫描完成: 共 {total} 篇文档, {len(app_docs)} 个 ws_app_key")
 
     # Build summaries
     app_summaries = []
@@ -128,7 +133,7 @@ def overview(ctx, max_docs, output_file):
     with open(output_file, "w") as f:
         f.write("\n".join(lines))
 
-    click.echo(f"知识地图已生成: {output_file}")
+    _progress(f"知识地图已生成: {output_file}")
 
     # Print summary
     from rich.console import Console
