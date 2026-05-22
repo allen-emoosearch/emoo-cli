@@ -480,6 +480,90 @@ emoo --json app doc-groups -k 9ecb14f83abf469db9d2d49d584b5fbc --page-size 10 --
 
 ---
 
+### skill — 自适应搜索技能
+
+三段式智能搜索流水线：先摸清数据地貌，再分析意图规划检索策略，最后执行多 app 聚合搜索。自动适配不同客户安装的 app 环境。
+
+```
+emoo skill knowledge-map    →  生成增强知识图谱 (JSON + MD)
+        ↓
+emoo skill intent <query>   →  读取知识图谱，分析意图，输出搜索方案 (JSON)
+        ↓
+emoo skill search -p plan   →  执行搜索方案，聚合结果
+```
+
+#### `emoo skill knowledge-map`
+
+扫描工作区，调用 `GET /v1/apps` + `GET /v1/app/{key}/doc-groups` + `POST /search` 采样，生成增强知识图谱。
+
+| 参数 | 必填 | 默认值 | 说明 |
+|------|:----:|--------|------|
+| `--max-sample-per-group` | 否 | 5 | 每个文档组采样标题数 |
+| `--max-doc-groups` | 否 | 200 | 最大采样文档组数（安全上限） |
+| `-o, --output-dir` | 否 | `.` | 输出目录 |
+
+```bash
+emoo skill knowledge-map
+emoo skill knowledge-map --max-sample-per-group 10 -o /tmp/km
+```
+
+输出文件：
+- `emoo_knowledge_map.json` — 机器可读，含每个 app 的所有文档组、示例标题、文档数
+- `emoo_knowledge_map.md` — 人类可读摘要
+
+#### `emoo skill intent`
+
+读取知识图谱 JSON，分析用户的自然语言查询意图（实体抽取 + 匹配），输出结构化搜索方案。
+
+| 参数 | 必填 | 默认值 | 说明 |
+|------|:----:|--------|------|
+| `QUERY` (参数) | 是 | — | 自然语言查询，如 "美罗城店3月营收" |
+| `-k, --knowledge-map` | 否 | `emoo_knowledge_map.json` | 知识图谱路径 |
+| `--top` | 否 | 5 | 最多输出几个搜索步骤 |
+| `-o, --output` | 否 | — | 保存搜索方案到文件 |
+
+```bash
+# 分析意图
+emoo skill intent "美罗城店2026年3月营收"
+
+# 限制步骤数 + 保存方案
+emoo skill intent "最近7天品项销售" --top 3 -o plan.json
+
+# 从管道输入 search
+emoo skill intent "营收" -o plan.json && emoo skill search -p plan.json
+```
+
+支持的时间表达：`3月`、`2026年3月`、`3月15日`、`最近N天`、`今天`、`昨天`、`上周`、`本周`、`这个月`。
+
+支持的实体类型：店名、人员、主题词（营收、品项、库存、员工、制度等，自动映射到文档组）。
+
+#### `emoo skill search`
+
+执行搜索方案，按顺序搜索多个 app，聚合结果。支持 CSV 导出。
+
+| 参数 | 必填 | 默认值 | 说明 |
+|------|:----:|--------|------|
+| `-p, --plan-file` | 是 | — | 搜索方案 JSON，`-` 从 stdin 读取 |
+| `--step` | 否 | — | 只执行某一步 |
+| `--max-per-step` | 否 | 200 | 每步最多返回结果数 |
+| `--csv` | 否 | — | 导出 CSV 路径 |
+
+```bash
+# 执行完整方案
+emoo skill search -p plan.json
+
+# 只执行第1步
+emoo skill search -p plan.json --step 1
+
+# 导出 CSV
+emoo skill search -p plan.json --csv output.csv
+
+# 端到端管道
+emoo skill intent "营收" -o plan.json && emoo skill search -p plan.json --csv out.csv
+```
+
+---
+
 ## 过滤条件语法
 
 `-f, --filter` 参数支持三种格式，CLI 会自动标准化为二维数组：
@@ -646,6 +730,10 @@ emoo auth set-default-user-id <open_id>    设置默认 User ID (OAuth2)
 emoo app overview                          遍历文档生成知识地图
 emoo app list                              列出所有 ws_app_key (含文档组数和文档数)
 emoo app doc-groups -k <key>               列出应用的文档组 (分页)
+
+emoo skill knowledge-map                   生成增强知识图谱 (JSON + MD)
+emoo skill intent "查询意图"               分析意图，输出搜索方案
+emoo skill search -p plan.json             执行搜索方案，聚合多 app 结果
 
 emoo contact list                          获取通讯录成员 (分页+关键词)
 emoo contact update <open_id>              更新成员信息 (用户名/扩展信息)
