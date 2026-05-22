@@ -269,7 +269,7 @@ emoo --user-id <id> contact update open_xxx --ext-info '{"key":"value"}'
 
 ```bash
 # 基本搜索
-emoo --user-id <id> data search -k "卡特彼勒"
+emoo --user-id <id> data search -k "关键词"
 
 # 分页 + markdown 格式
 emoo --user-id <id> data search -k "方案" --page-size 10 --current-page 2 --text-format markdown
@@ -350,11 +350,11 @@ emoo --user-id <id> chat create --title "项目讨论"
 
 ```bash
 # 新对话
-emoo --user-id <id> chat send -q "轻流是什么产品？"
+emoo --user-id <id> chat send -q "最近一周的销售数据汇总"
 
 # 多轮对话
-emoo --user-id <id> chat send -q "轻流是什么？" --chat-id 5172
-emoo --user-id <id> chat send -q "它的核心功能有哪些？" --chat-id 5172
+emoo --user-id <id> chat send -q "什么是EMOO？" --chat-id 5172
+emoo --user-id <id> chat send -q "EMOO有哪些核心功能？" --chat-id 5172
 
 # 带文件引用
 emoo --user-id <id> chat send -q "总结这些文档" --chat-id 5172 --file-list "https://example.com/doc1,https://example.com/doc2"

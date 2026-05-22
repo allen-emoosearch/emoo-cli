@@ -49,8 +49,8 @@ src/
 
 ## 测试
 
-- 多租户测试: 轻流 (qingflow) + 煲仔皇 (baozaihuang)
-- 配置切换: `~/.emoo/config.json` vs `config.qingliu.json` vs `config.baozai.json`
+- 多租户测试: API Key 模式 + OAuth2 模式，覆盖不同自定义域名
+- 配置切换: 通过 `~/.emoo/config.json` 切换不同工作区进行回归测试
 - 每个命令验证: 正常调用、`--json` 输出、`--dry-run` 预览、错误场景
 
 ## 提交规范
