@@ -145,18 +145,29 @@ emoo data search -k "报告" -f '{"field":"ws_app.ws_app_key","operator":"eq","v
 
 ### Auto-pagination and the 500-record cap
 
-The search API has a hard cap of 500 results. Without `--max-results`, if results hit this cap, CLI prints a warning to stderr:
+`/search` has a **hard 500-record cap** that auto-pagination cannot break. `/data` (cursor-based) has **no hard cap**.
+
+Without `--max-results`, if search results hit 500, CLI warns on stderr:
 
 ```
 ⚠ 结果可能不完整: API 单次上限 500 条，当前已返回 200 条。
-  使用 --max-results <N> 自动翻页获取更多 (如 --max-results 2000)，或按日期分段查询。
 ```
 
-With `--max-results <N>`, CLI auto-paginates (via `current_page` for search, `cursor` for get) until reaching N results or exhausting the data source.
+With `--max-results <N>` on `data search`, CLI auto-paginates but still caps at 500, and warns:
+
+```
+⚠ 结果可能不完整: search 端点硬上限 500 条，自动翻页也无法突破。
+  建议: 用 emoo data get (游标翻页无此限制) 配合日期过滤分段拉取。
+```
+
+For >500 records, always use `data get` with `--max-results`:
 
 ```bash
-emoo data search -k "上海" --max-results 2000    # auto-paginate up to 2000
-emoo data get --max-results 1000                  # cursor-based auto-pagination
+# search — 500 hard cap, set _truncated=true when hit
+emoo data search -k "上海" --max-results 2000
+
+# data get — cursor-based, no hard cap, truly paginates to exhaustion
+emoo data get -f '<filter>' --max-results 10000
 ```
 
 ### Dry-run — preview without executing

@@ -88,7 +88,12 @@ def _auto_paginate_search(client, body, max_results, ctx):
     resp["data"]["results"] = all_results
     resp["data"]["total"] = len(all_results)
     resp["data"]["_paginated"] = True
-    return resp, api_total == API_RESULT_CAP and len(all_results) < api_total
+
+    # search 端点有 500 条硬上限，total 永远不超过 500
+    truncated = (api_total == API_RESULT_CAP and len(all_results) >= API_RESULT_CAP)
+    if truncated:
+        resp["data"]["_truncated"] = True
+    return resp, truncated
 
 
 @data.command()
@@ -109,14 +114,15 @@ def _auto_paginate_search(client, body, max_results, ctx):
                    'ws_app.ws_app_key, author_ws_app_user_id\n'
                    '运算符: eq, neq, in, nin, gte, lte')
 @click.option("--max-results", type=int, default=None,
-              help=f"最多返回条数，自动翻页 (API 单次上限 {API_RESULT_CAP})")
+              help=f"最多返回条数，自动翻页 (search 端点硬上限 {API_RESULT_CAP}，超出用 data get)")
 @click.pass_context
 def search(ctx, keyword, page_size, current_page, text_format, ws_agent_key,
            filter_conditions, max_results):
     """搜索数据.
 
     不加 --max-results 时单次查询，结果超过 {API_RESULT_CAP} 条会输出截断警告。
-    加 --max-results 时自动翻页，直到拿到足够数据或数据源耗尽。
+    加 --max-results 时自动翻页，但 search 端点有 {API_RESULT_CAP} 条硬上限无法突破。
+    需要拉取超过 {API_RESULT_CAP} 条请用 emoo data get (游标翻页，无此限制)。
 
     \b
     示例:
@@ -144,7 +150,12 @@ def search(ctx, keyword, page_size, current_page, text_format, ws_agent_key,
     client = EmooClient(base_url=ctx.obj.get("base_url"), user_id=ctx.obj.get("user_id"))
 
     if max_results:
-        resp, _ = _auto_paginate_search(client, dict(body), max_results, ctx)
+        resp, truncated = _auto_paginate_search(client, dict(body), max_results, ctx)
+        if truncated:
+            _progress(
+                f"⚠ 结果可能不完整: search 端点硬上限 {API_RESULT_CAP} 条，自动翻页也无法突破。"
+            )
+            _progress(f"  建议: 用 emoo data get (游标翻页无此限制) 配合日期过滤分段拉取。")
         output(resp, as_json=ctx.obj.get("as_json", False))
         return
 
@@ -169,7 +180,7 @@ def search(ctx, keyword, page_size, current_page, text_format, ws_agent_key,
 @click.option("--filter", "-f", "filter_conditions", callback=_parse_filter, default=None,
               help='过滤条件，四种格式同上 search')
 @click.option("--max-results", type=int, default=None,
-              help=f"最多返回条数，自动翻页 (API 单次上限 {API_RESULT_CAP})")
+              help="最多返回条数，游标自动翻页直到拿满或数据源耗尽 (无 500 硬上限)")
 @click.pass_context
 def get(ctx, page_size, cursor, text_format, filter_conditions, max_results):
     """获取数据 (游标分页).

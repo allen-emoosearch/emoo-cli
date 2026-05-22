@@ -266,10 +266,11 @@ emoo --user-id <id> contact update open_xxx --ext-info '{"key":"value"}'
 | `--text-format` | 否 | plain | `plain` 或 `markdown`（语雀 HTML） |
 | `--ws-agent-key` | 否 | — | Dify/Coze/Timus 平台需传入的 Agent Key |
 | `-f, --filter` | 否 | — | 过滤条件，JSON 字符串或 JSON 文件路径 |
-| `--max-results` | 否 | — | 最多返回条数，自动翻页（不传则单次查询） |
+| `--max-results` | 否 | — | 最多返回条数，自动翻页（受 search 端点 500 条硬上限约束） |
 
-> **自动翻页**: 不加 `--max-results` 时单次查询最多返回 500 条，超过会在 stderr 输出截断警告。
-> 加 `--max-results` 时 CLI 自动翻页直到拿到足够数据或数据源耗尽，不会输出警告。
+> **重要**: `search` 端点有 **500 条硬上限**，即使加 `--max-results` 自动翻页也无法突破。
+> 不加 `--max-results` 时超过 500 条会在 stderr 输出截断警告（含 `_truncated: true` 标志）。
+> 需要拉取超过 500 条数据，请用 `emoo data get`（游标翻页，无此限制）。
 
 ```bash
 # 基本搜索
@@ -278,8 +279,10 @@ emoo --user-id <id> data search -k "关键词"
 # 分页 + markdown 格式
 emoo --user-id <id> data search -k "方案" --page-size 10 --current-page 2 --text-format markdown
 
-# 自动翻页获取更多数据
+# 自动翻页 (但最多只能拿到 500 条)
 emoo --user-id <id> data search -k "上海" --max-results 2000
+
+# 大量数据: 用 data get 游标翻页 (无 500 上限)
 
 # 带过滤条件（外层 OR，内层 AND）
 emoo --user-id <id> data search -k "报告" -f '[[{"field":"ws_app.ws_app_key","operator":"eq","value":"abc123"}]]'
@@ -295,7 +298,7 @@ emoo --user-id <id> data search -k "test" --json | jq '.data.results[].title'
 
 #### `emoo data get`
 
-游标分页获取文档数据，用法与 search 类似但不传 keyword。
+游标分页获取文档数据，用法与 search 类似但不传 keyword。**无 500 条硬上限**，适合大量数据拉取。
 
 | 参数 | 必填 | 默认值 | 说明 |
 |------|:----:|--------|------|
@@ -303,12 +306,15 @@ emoo --user-id <id> data search -k "test" --json | jq '.data.results[].title'
 | `--cursor` | 否 | "" | 分页游标，空则从头开始 |
 | `--text-format` | 否 | plain | `plain` 或 `markdown`（语雀 HTML） |
 | `-f, --filter` | 否 | — | 过滤条件 |
-| `--max-results` | 否 | — | 最多返回条数，自动用游标翻页 |
+| `--max-results` | 否 | — | 最多返回条数，游标自动翻页直到拿满或耗尽 |
+
+> **提示**: 需要拉取超过 500 条数据时，用 `data get` + 日期过滤分段拉取，
+> 比 `data search` 更可靠（search 端点有 500 硬上限）。
 
 ```bash
 emoo --user-id <id> data get --page-size 10
 emoo --user-id <id> data get --page-size 10 -f '[[{"field":"app_updated_at","operator":"gte","value":"2025-01-01T00:00:00+08:00"}]]'
-emoo --user-id <id> data get --max-results 1000
+emoo --user-id <id> data get --max-results 5000
 ```
 
 ---
