@@ -152,6 +152,60 @@
       {"name": "records", "type": "array", "required": true, "desc": "记录列表，1-100 条"}
     ]
   },
+  "base.record-update": {
+    "method": "PUT",
+    "path": "/data/records/{record_key}",
+    "auth_required": true,
+    "user_id_required": true,
+    "description": "更新单条记录",
+    "body": [
+      {"name": "table_name", "type": "string", "required": "条件", "desc": "表显示名称（与 table_key 二选一）"},
+      {"name": "table_key", "type": "string", "required": "条件", "desc": "表系统标识（与 table_name 二选一）"},
+      {"name": "fields", "type": "object", "required": true, "desc": "需要更新的字段 JSON 对象"}
+    ],
+    "path_params": [
+      {"name": "record_key", "type": "string", "required": true, "desc": "记录标识"}
+    ]
+  },
+  "base.record-batch-update": {
+    "method": "PUT",
+    "path": "/data/records/batch",
+    "auth_required": true,
+    "user_id_required": true,
+    "description": "批量更新记录（最多 100 条）",
+    "body": [
+      {"name": "table_name", "type": "string", "required": "条件", "desc": "表显示名称（与 table_key 二选一）"},
+      {"name": "table_key", "type": "string", "required": "条件", "desc": "表系统标识（与 table_name 二选一）"},
+      {"name": "records", "type": "array", "required": true, "desc": "记录数组，每条含 record_key 和 fields，最多 100 条"}
+    ]
+  },
+  "base.record-delete": {
+    "method": "DELETE",
+    "path": "/data/records",
+    "auth_required": true,
+    "user_id_required": true,
+    "description": "删除记录（最多 100 条）",
+    "body": [
+      {"name": "table_name", "type": "string", "required": "条件", "desc": "表显示名称（与 table_key 二选一）"},
+      {"name": "table_key", "type": "string", "required": "条件", "desc": "表系统标识（与 table_name 二选一）"},
+      {"name": "record_keys", "type": "array", "required": true, "desc": "记录标识数组，最多 100 条"}
+    ]
+  },
+  "base.record-list": {
+    "method": "GET",
+    "path": "/data/records",
+    "auth_required": true,
+    "user_id_required": true,
+    "description": "查询记录列表（分页+过滤+排序）",
+    "params": [
+      {"name": "table_name", "type": "string", "required": "条件", "desc": "表显示名称（与 table_key 二选一）"},
+      {"name": "table_key", "type": "string", "required": "条件", "desc": "表系统标识（与 table_name 二选一）"},
+      {"name": "page_size", "type": "integer", "required": false, "desc": "每页数量，最大 100"},
+      {"name": "current_page", "type": "integer", "required": false, "desc": "页码，从 1 开始"},
+      {"name": "filter", "type": "string", "required": false, "desc": "过滤条件（如 status:eq:active）"},
+      {"name": "sort", "type": "string", "required": false, "desc": "排序（如 created_at:desc）"}
+    ]
+  },
   "app.list": {
     "method": "GET",
     "path": "/apps",
