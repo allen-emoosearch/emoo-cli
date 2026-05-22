@@ -1,4 +1,4 @@
-"""Skill commands: adaptive search pipeline (knowledge-map → intent → search)."""
+"""Skill commands: MD-driven adaptive search + Claude Code integration."""
 
 import json
 import os
@@ -10,20 +10,364 @@ from ..client import EmooClient
 from ..formatters import output
 from ..skills import generate_knowledge_map, analyze_intent, execute_search_plan
 from ..skills.search import export_results_csv
+from ..skills.loader import (
+    load_all_skills, find_skill, validate_params, SKILLS_DIR,
+)
+from ..skills.runner import run_skill, export_skill_csv
+from ..skills.registry import (
+    ensure_skills_dir, register_symlink, is_registered, unregister,
+)
 
+
+# ── template for `emoo skill create` ────────────────────────────────────────
+
+SKILL_TEMPLATE = """---
+name: {name}
+description: {description}
+type: {skill_type}
+category: {category}
+tags: []
+emoo:
+  search:
+    keyword: "{keyword}"
+    page_size: 200
+  params:
+    keyword:
+      description: 搜索关键词
+      required: false
+---
+
+# {name}
+
+## 使用方式
+
+```bash
+emoo skill run {name} --keyword "关键词"
+```
+"""
+
+# ── top-level skill group ───────────────────────────────────────────────────
 
 @click.group()
 def skill():
-    """自适应搜索技能 (知识图谱 → 意图分析 → 方案执行).
+    """MD 驱动的自适应搜索技能 + Claude Code 集成.
 
-    三段式智能搜索流水线，自动适配不同客户的数据环境:
-      knowledge-map  生成增强知识图谱 (JSON + MD)
-      intent         分析搜索意图，输出搜索方案
-      search         执行搜索方案，聚合多 app 结果
+    一份 MD，两处运行 — skill 文件既是 Claude Code 能加载的 skill，也是 CLI 能执行的搜索模板.
+
+    \b
+    快速开始:
+      emoo skill init                 初始化 + 注册到 Claude Code
+      emoo skill list                 列出所有 skill
+      emoo skill run <name>           执行 skill 搜索
+      emoo skill pipeline knowledge-map  生成知识图谱
     """
 
 
+# ── init ────────────────────────────────────────────────────────────────────
+
 @skill.command()
+@click.option("--no-register", is_flag=True, help="只创建目录，不注册到 Claude Code")
+def init(no_register):
+    """初始化 skills 目录并注册到 Claude Code.
+
+    创建 ~/.emoo/skills/ 目录（如不存在），并建立 symlink:
+      ~/.claude/skills/emoo/ → ~/.emoo/skills/
+
+    注册后，Claude Code 即可加载所有 emoo skill 文件。
+    """
+    skills_dir = ensure_skills_dir()
+    click.echo(f"Skills 目录: {skills_dir}")
+
+    if no_register:
+        click.echo("已跳过 Claude Code 注册 (--no-register)")
+        return
+
+    ok, msg = register_symlink()
+    if ok:
+        click.echo(f"  {msg}")
+    else:
+        click.echo(f"  [警告] {msg}", err=True)
+
+    click.echo("\n使用 emoo skill create <name> 创建新 skill")
+
+
+# ── register ────────────────────────────────────────────────────────────────
+
+@skill.command()
+@click.option("--unregister", "do_unregister", is_flag=True, help="取消注册")
+def register(do_unregister):
+    """注册/刷新 emoo skills 到 Claude Code.
+
+    默认创建 symlink: ~/.claude/skills/emoo/ → ~/.emoo/skills/
+    使用 --unregister 可取消注册。
+    """
+    if do_unregister:
+        ok, msg = unregister()
+        click.echo(msg if ok else f"[错误] {msg}", err=not ok)
+        return
+
+    if is_registered():
+        click.echo(f"已注册: ~/.claude/skills/emoo/ → ~/.emoo/skills/")
+    else:
+        ok, msg = register_symlink()
+        click.echo(msg if ok else f"[错误] {msg}", err=not ok)
+
+
+# ── list ────────────────────────────────────────────────────────────────────
+
+@skill.command("list")
+@click.option("--category", "-c", default=None, help="按分类过滤")
+@click.option("--type", "type_filter", default=None,
+              help="按类型过滤 (scenario|dimension)")
+@click.pass_context
+def list_skills(ctx, category, type_filter):
+    """列出所有已安装的 skill."""
+    skills = load_all_skills()
+
+    if category:
+        skills = [s for s in skills if s.category == category]
+    if type_filter:
+        skills = [s for s in skills if s.type == type_filter]
+
+    if ctx.obj.get("as_json"):
+        click.echo(json.dumps([s.to_dict() for s in skills], ensure_ascii=False, indent=2))
+        return
+
+    if not skills:
+        click.echo(f"[dim]Skills 目录为空 ({SKILLS_DIR})[/dim]")
+        click.echo("使用 emoo skill create <name> 创建新 skill")
+        return
+
+    from rich.console import Console
+    from rich.table import Table
+
+    # Group by category
+    by_cat: dict[str, list] = {}
+    for s in skills:
+        by_cat.setdefault(s.category, []).append(s)
+
+    console = Console()
+    for cat, items in sorted(by_cat.items()):
+        table = Table(title=f"📁 {cat} ({len(items)})", width=100)
+        table.add_column("名称", style="cyan")
+        table.add_column("类型")
+        table.add_column("描述")
+        table.add_column("参数")
+        for s in items:
+            type_tag = "[green]场景[/green]" if s.type == "scenario" else "[blue]维度[/blue]"
+            param_names = ", ".join(s.params.keys()) if s.params else "—"
+            table.add_row(s.name, type_tag, s.description[:50], param_names)
+        console.print(table)
+        console.print()
+
+
+# ── show ────────────────────────────────────────────────────────────────────
+
+@skill.command()
+@click.argument("name")
+@click.option("--params-only", is_flag=True, help="仅显示参数说明")
+@click.pass_context
+def show(ctx, name, params_only):
+    """显示 skill 的完整 MD 内容和参数说明.
+
+    NAME: skill 名称 (文件名或 frontmatter name)
+    """
+    sd = find_skill(name)
+    if not sd:
+        raise click.BadParameter(f"未找到 skill: {name}")
+
+    if params_only or ctx.obj.get("as_json"):
+        click.echo(json.dumps(sd.to_dict(), ensure_ascii=False, indent=2))
+        return
+
+    # Print the raw MD content with syntax highlighting
+    with open(sd.filepath, encoding="utf-8") as f:
+        content = f.read()
+
+    from rich.console import Console
+    from rich.panel import Panel
+    from rich.markdown import Markdown
+    console = Console()
+
+    console.print(Panel(
+        f"[bold]{sd.name}[/bold]  [dim]{sd.filepath}[/dim]",
+        title="Skill 详情",
+    ))
+
+    # Show frontmatter summary
+    console.print(f"[bold]类型:[/bold] {sd.type}  |  "
+                  f"[bold]分类:[/bold] {sd.category}  |  "
+                  f"[bold]CSV导出:[/bold] {'是' if sd.csv_export else '否'}")
+    console.print(f"[bold]搜索关键词:[/bold] {sd.keyword}")
+    if sd.app_name:
+        console.print(f"[bold]目标应用:[/bold] {sd.app_name}")
+    if sd.doc_group_name:
+        console.print(f"[bold]文档组:[/bold] {sd.doc_group_name}")
+    console.print()
+
+    # Render markdown body
+    md = Markdown(content)
+    console.print(md)
+
+
+# ── run ─────────────────────────────────────────────────────────────────────
+
+@skill.command(context_settings=dict(ignore_unknown_options=True, allow_extra_args=True))
+@click.argument("name")
+@click.option("--csv", "csv_path", default=None, help="导出 CSV 文件路径")
+@click.option("--max-results", default=200, help="最大结果数 (默认200)")
+@click.option("-k", "--knowledge-map", "km_path", default="emoo_knowledge_map.json",
+              help="知识图谱路径 (默认 ./emoo_knowledge_map.json)")
+@click.pass_context
+def run(ctx, name, csv_path, max_results, km_path):
+    """执行 skill 搜索.
+
+    NAME: skill 名称
+    其他参数通过 --param value 格式传递，与 skill 定义的参数对应.
+
+    \b
+    示例:
+      emoo skill run store-revenue --store "美罗城" --month "2026-03"
+      emoo skill run store-revenue --store "美罗城" --csv output.csv
+      emoo skill run item-analysis --item "红烧肉" --month "2026-03"
+    """
+    sd = find_skill(name)
+    if not sd:
+        raise click.BadParameter(f"未找到 skill: {name}")
+
+    # Parse extra args (--param value pairs collected via allow_extra_args)
+    params = {}
+    extra_args = list(ctx.args)
+    i = 0
+    while i < len(extra_args):
+        arg = extra_args[i]
+        if arg.startswith("--"):
+            key = arg[2:]
+            if "=" in key:
+                k, v = key.split("=", 1)
+                params[k] = v
+                i += 1
+            elif i + 1 < len(extra_args) and not extra_args[i + 1].startswith("--"):
+                params[key] = extra_args[i + 1]
+                i += 2
+            else:
+                params[key] = "true"
+                i += 1
+        else:
+            i += 1
+
+    # Validate
+    errors = validate_params(sd, params)
+    if errors:
+        for e in errors:
+            click.echo(f"[错误] {e}", err=True)
+        raise click.UsageError("参数校验失败，请检查后重试")
+
+    client = EmooClient(base_url=ctx.obj.get("base_url"), user_id=ctx.obj.get("user_id"))
+
+    click.echo(f"执行 skill: {sd.name}")
+
+    outcome = run_skill(client, sd, params, knowledge_map_path=km_path, max_results=max_results)
+
+    if outcome.get("errors"):
+        for err in outcome["errors"]:
+            click.echo(f"[警告] {err}", err=True)
+
+    if ctx.obj.get("as_json"):
+        click.echo(json.dumps(outcome, ensure_ascii=False, indent=2))
+    else:
+        results = outcome.get("results", [])
+        if not results:
+            click.echo(f"无结果 — 关键词: '{outcome['keyword']}'")
+            return
+
+        click.echo(f"\n关键词: '{outcome['keyword']}' | 共 {outcome['total']} 条结果")
+
+        from rich.console import Console
+        from rich.table import Table
+        console = Console()
+
+        table = Table(title="搜索结果")
+        table.add_column("#", justify="right")
+        table.add_column("标题")
+        table.add_column("创建时间")
+        for i, r in enumerate(results[:50], 1):
+            table.add_row(
+                str(i),
+                (r.get("title", "") or "")[:70],
+                (r.get("app_created_at", "") or "")[:16],
+            )
+        console.print(table)
+
+        if len(results) > 50:
+            console.print(f"[dim]... 还有 {len(results) - 50} 条结果[/dim]")
+
+    if csv_path:
+        path = export_skill_csv(outcome, csv_path)
+        click.echo(f"CSV 已导出: {path}")
+    elif sd.csv_export:
+        # Auto-export if skill has csv_export: true
+        csv_name = f"{sd.name}_{outcome['keyword'][:20]}.csv"
+        path = export_skill_csv(outcome, csv_name)
+        click.echo(f"CSV 已自动导出: {path}")
+
+
+# ── create ──────────────────────────────────────────────────────────────────
+
+@skill.command()
+@click.argument("name")
+@click.option("--description", "-d", default="", help="一句话描述")
+@click.option("--category", "-c", default="未分类", help="分类标签")
+@click.option("--type", "skill_type", default="scenario",
+              type=click.Choice(["scenario", "dimension"]),
+              help="skill 类型 (默认 scenario)")
+@click.option("--keyword", "-k", default="", help="搜索关键词模板 (支持 {param})")
+def create(name, description, skill_type, category, keyword):
+    """创建新 skill MD 文件 (脚手架).
+
+    NAME: skill 名称 (用作文件名和标识)
+
+    \b
+    示例:
+      emoo skill create store-revenue -c "门店营收" --keyword "{store} {month}"
+      emoo skill create app-filter --type dimension -c "搜索维度"
+    """
+    skills_dir = ensure_skills_dir()
+    filepath = os.path.join(skills_dir, f"{name}.md")
+
+    if os.path.exists(filepath):
+        raise click.BadParameter(f"skill 文件已存在: {filepath}")
+
+    desc = description or name
+    kw = keyword or f"{name} 搜索"
+    content = SKILL_TEMPLATE.format(
+        name=name, description=desc,
+        skill_type=skill_type, category=category,
+        keyword=kw,
+    )
+
+    with open(filepath, "w", encoding="utf-8") as f:
+        f.write(content)
+
+    click.echo(f"Skill 文件已创建: {filepath}")
+    click.echo(f"  名称: {name}")
+    click.echo(f"  分类: {category}")
+    click.echo(f"  类型: {skill_type}")
+    click.echo(f"\n编辑该文件以完善搜索参数和说明，然后使用:")
+    click.echo(f"  emoo skill run {name}")
+
+
+# ── pipeline sub-group ──────────────────────────────────────────────────────
+
+@skill.group()
+def pipeline():
+    """自适应搜索流水线 (知识图谱 → 意图分析 → 方案执行).
+
+    三段式智能搜索流水线，自动适配不同客户的数据环境。
+    """
+
+
+@pipeline.command()
 @click.option("--max-sample-per-group", default=5, help="每个文档组采样标题数 (默认5)")
 @click.option("--max-doc-groups", default=200, help="最大采样文档组数 (默认200)")
 @click.option("-o", "--output-dir", default=".", help="输出目录 (默认当前目录)")
@@ -37,8 +381,8 @@ def knowledge_map(ctx, max_sample_per_group, max_doc_groups, output_dir):
 
     \b
     示例:
-      emoo skill knowledge-map
-      emoo skill knowledge-map --max-sample-per-group 10 -o /tmp
+      emoo skill pipeline knowledge-map
+      emoo skill pipeline knowledge-map --max-sample-per-group 10 -o /tmp
     """
     client = EmooClient(base_url=ctx.obj.get("base_url"), user_id=ctx.obj.get("user_id"))
 
@@ -50,7 +394,6 @@ def knowledge_map(ctx, max_sample_per_group, max_doc_groups, output_dir):
         output_dir=output_dir,
     )
 
-    # Load and display summary
     with open(json_path, encoding="utf-8") as f:
         km = json.load(f)
 
@@ -86,7 +429,7 @@ def knowledge_map(ctx, max_sample_per_group, max_doc_groups, output_dir):
         console.print(table)
 
 
-@skill.command()
+@pipeline.command()
 @click.argument("query")
 @click.option("-k", "--knowledge-map", "km_path", default="emoo_knowledge_map.json",
               help="知识图谱 JSON 路径 (默认 ./emoo_knowledge_map.json)")
@@ -100,9 +443,9 @@ def intent(ctx, query, km_path, top, output_file):
 
     \b
     示例:
-      emoo skill intent "查美罗城店2026年3月营收"
-      emoo skill intent "上周品项销售情况" --top 3
-      emoo skill intent "最近7天员工考勤" -o plan.json
+      emoo skill pipeline intent "查美罗城店2026年3月营收"
+      emoo skill pipeline intent "上周品项销售情况" --top 3
+      emoo skill pipeline intent "最近7天员工考勤" -o plan.json
     """
     result = analyze_intent(query, knowledge_map_path=km_path)
 
@@ -124,7 +467,6 @@ def intent(ctx, query, km_path, top, output_file):
         from rich.panel import Panel
         console = Console()
 
-        # Entities
         entities = result.get("entities", {})
         ent_lines = []
         if entities.get("names"):
@@ -137,7 +479,6 @@ def intent(ctx, query, km_path, top, output_file):
         if ent_lines:
             console.print(Panel("\n".join(ent_lines), title="提取的实体"))
 
-        # Search plan
         if not plan:
             console.print("[dim]未找到匹配的搜索方案，请检查知识图谱是否覆盖了查询内容[/dim]")
             return
@@ -161,7 +502,6 @@ def intent(ctx, query, km_path, top, output_file):
             )
         console.print(table)
 
-        # Search command hints
         console.print("\n[bold]可直接执行:[/bold]")
         for p in plan:
             filters_str = json.dumps(p["filters"], ensure_ascii=False)
@@ -177,7 +517,7 @@ def intent(ctx, query, km_path, top, output_file):
         click.echo(f"\n搜索方案已保存: {output_file}")
 
 
-@skill.command()
+@pipeline.command()
 @click.option("-p", "--plan-file", required=True,
               help="搜索方案 JSON 文件路径 (使用 '-' 从 stdin 读取)")
 @click.option("--step", type=int, default=None, help="只执行某一步")
@@ -191,12 +531,11 @@ def search(ctx, plan_file, step, max_per_step, csv_path):
 
     \b
     示例:
-      emoo skill search -p plan.json
-      emoo skill search -p plan.json --csv output.csv
-      emoo skill search -p plan.json --step 1
-      emoo skill intent "营收" | emoo skill search -p -
+      emoo skill pipeline search -p plan.json
+      emoo skill pipeline search -p plan.json --csv output.csv
+      emoo skill pipeline search -p plan.json --step 1
+      emoo skill pipeline intent "营收" | emoo skill pipeline search -p -
     """
-    # Load plan
     if plan_file == "-":
         plan = json.load(sys.stdin)
     elif os.path.exists(plan_file):

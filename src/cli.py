@@ -7,11 +7,11 @@ from .commands import auth, contact, data, chat, message, base, app, skill
 EPILOG = """\b
 快速开始:
   emoo auth login --api-key <key>       API Key 登录 (推荐)
-  emoo auth login --client-id <id> ...  OAuth2 登录
   emoo auth status                      查看认证状态
-  emoo skill knowledge-map              生成增强知识图谱 (JSON + MD)
-  emoo skill intent "查询意图"           分析意图，输出搜索方案
-  emoo skill search -p plan.json        执行搜索方案，聚合多 app 结果
+  emoo skill init                       初始化 + 注册到 Claude Code
+  emoo skill list                       列出所有 skill
+  emoo skill run <name>                 执行 skill 搜索
+  emoo skill pipeline knowledge-map     生成增强知识图谱
   emoo data search -k "关键词"           搜索数据
   emoo chat send -q "你好"              发送对话
 

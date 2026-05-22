@@ -480,86 +480,161 @@ emoo --json app doc-groups -k 9ecb14f83abf469db9d2d49d584b5fbc --page-size 10 --
 
 ---
 
-### skill — 自适应搜索技能
+### skill — MD 驱动的自适应搜索 + Claude Code 集成
 
-三段式智能搜索流水线：先摸清数据地貌，再分析意图规划检索策略，最后执行多 app 聚合搜索。自动适配不同客户安装的 app 环境。
+**一份 MD，两处运行** — skill 文件既是 Claude Code 能加载的 skill，也是 CLI 能执行的搜索模板。
+
+Skill 文件存放在 `~/.emoo/skills/*.md`，使用 YAML frontmatter 定义搜索参数，Markdown body 作为说明文档。
 
 ```
-emoo skill knowledge-map    →  生成增强知识图谱 (JSON + MD)
-        ↓
-emoo skill intent <query>   →  读取知识图谱，分析意图，输出搜索方案 (JSON)
-        ↓
-emoo skill search -p plan   →  执行搜索方案，聚合结果
+~/.emoo/skills/                   ~/.claude/skills/emoo/  (symlink)
+  ├── store-revenue.md               Claude Code 自动加载
+  ├── item-analysis.md
+  ├── employee-search.md
+  ├── policy-search.md
+  ├── app-filter.md
+  └── time-filter.md
 ```
 
-#### `emoo skill knowledge-map`
+#### Skill MD 格式
 
-扫描工作区，调用 `GET /v1/apps` + `GET /v1/app/{key}/doc-groups` + `POST /search` 采样，生成增强知识图谱。
+```markdown
+---
+name: store-revenue                    # 唯一标识
+description: 查询指定门店的营业数据   # 一句话描述
+type: scenario                         # scenario(场景) 或 dimension(维度)
+category: 门店营收                     # 分类标签
+tags: [营收, POS, 门店]
+emoo:
+  search:
+    keyword: "{store} {month} 营业情况"  # 搜索关键词模板，{param} 占位
+    app: 天财·POS系统                   # 可选，自动匹配 ws_app_key
+    doc_group: 营业情况汇总             # 可选，限定文档组
+    page_size: 200                      # 可选，默认 200
+  params:
+    store:
+      description: 门店名称（如 美罗城）
+      required: true
+      example: 美罗城
+    month:
+      description: 月份（如 2026-03）
+      required: false
+      default: "2026-03"
+      map_to: time_range               # 自动生成时间过滤条件
+  csv_export: true                      # 可选，执行后自动导出 CSV
+---
 
-| 参数 | 必填 | 默认值 | 说明 |
-|------|:----:|--------|------|
-| `--max-sample-per-group` | 否 | 5 | 每个文档组采样标题数 |
-| `--max-doc-groups` | 否 | 200 | 最大采样文档组数（安全上限） |
-| `-o, --output-dir` | 否 | `.` | 输出目录 |
+# 门店营收查询
+
+## 使用方式
+...
+```
+
+#### 初始化 + Claude Code 注册
 
 ```bash
-emoo skill knowledge-map
-emoo skill knowledge-map --max-sample-per-group 10 -o /tmp/km
+# 初始化 skills 目录 + 注册到 Claude Code
+emoo skill init
+
+# 创建 symlink: ~/.claude/skills/emoo/ → ~/.emoo/skills/
+# 注册后，Claude Code 可自动加载所有 emoo skill
 ```
 
-输出文件：
-- `emoo_knowledge_map.json` — 机器可读，含每个 app 的所有文档组、示例标题、文档数
-- `emoo_knowledge_map.md` — 人类可读摘要
+#### `emoo skill list`
 
-#### `emoo skill intent`
-
-读取知识图谱 JSON，分析用户的自然语言查询意图（实体抽取 + 匹配），输出结构化搜索方案。
-
-| 参数 | 必填 | 默认值 | 说明 |
-|------|:----:|--------|------|
-| `QUERY` (参数) | 是 | — | 自然语言查询，如 "美罗城店3月营收" |
-| `-k, --knowledge-map` | 否 | `emoo_knowledge_map.json` | 知识图谱路径 |
-| `--top` | 否 | 5 | 最多输出几个搜索步骤 |
-| `-o, --output` | 否 | — | 保存搜索方案到文件 |
+列出所有已安装的 skill，按分类分组展示。
 
 ```bash
-# 分析意图
-emoo skill intent "美罗城店2026年3月营收"
-
-# 限制步骤数 + 保存方案
-emoo skill intent "最近7天品项销售" --top 3 -o plan.json
-
-# 从管道输入 search
-emoo skill intent "营收" -o plan.json && emoo skill search -p plan.json
+emoo skill list
+emoo skill list --category "门店营收"     # 按分类过滤
+emoo skill list --type dimension          # 按类型过滤 (scenario|dimension)
+emoo --json skill list                    # JSON 输出
 ```
 
-支持的时间表达：`3月`、`2026年3月`、`3月15日`、`最近N天`、`今天`、`昨天`、`上周`、`本周`、`这个月`。
+#### `emoo skill show`
 
-支持的实体类型：店名、人员、主题词（营收、品项、库存、员工、制度等，自动映射到文档组）。
-
-#### `emoo skill search`
-
-执行搜索方案，按顺序搜索多个 app，聚合结果。支持 CSV 导出。
-
-| 参数 | 必填 | 默认值 | 说明 |
-|------|:----:|--------|------|
-| `-p, --plan-file` | 是 | — | 搜索方案 JSON，`-` 从 stdin 读取 |
-| `--step` | 否 | — | 只执行某一步 |
-| `--max-per-step` | 否 | 200 | 每步最多返回结果数 |
-| `--csv` | 否 | — | 导出 CSV 路径 |
+显示 skill 的完整 MD 内容和参数说明。
 
 ```bash
-# 执行完整方案
-emoo skill search -p plan.json
+emoo skill show store-revenue             # 渲染 markdown
+emoo skill show store-revenue --params-only  # 仅参数 JSON
+```
 
-# 只执行第1步
-emoo skill search -p plan.json --step 1
+#### `emoo skill run`
+
+执行 skill 搜索。参数通过 `--param value` 格式传递。
+
+```bash
+# 场景类 skill
+emoo skill run store-revenue --store "美罗城" --month "2026-03"
+
+# 维度类 skill
+emoo skill run app-filter --keyword "营收" --app_name "天财·POS系统"
+emoo skill run time-filter --keyword "报告" --time "最近7天"
 
 # 导出 CSV
-emoo skill search -p plan.json --csv output.csv
+emoo skill run store-revenue --store "美罗城" --csv output.csv
+```
 
-# 端到端管道
-emoo skill intent "营收" -o plan.json && emoo skill search -p plan.json --csv out.csv
+执行流程：模板替换 → app/doc_group 名称解析（知识图谱） → 时间过滤生成 → POST /search → 可选 CSV 导出。
+
+#### `emoo skill create`
+
+脚手架 — 快速创建新 skill MD 文件。
+
+| 参数 | 必填 | 说明 |
+|------|:----:|------|
+| `NAME` (参数) | 是 | skill 名称（用作文件名和标识） |
+| `-d, --description` | 否 | 一句话描述 |
+| `-c, --category` | 否 | 分类标签 |
+| `--type` | 否 | scenario 或 dimension（默认 scenario） |
+| `-k, --keyword` | 否 | 搜索关键词模板 |
+
+```bash
+emoo skill create store-revenue -c "门店营收" --keyword "{store} {month}"
+emoo skill create app-filter --type dimension -c "搜索维度"
+```
+
+#### `emoo skill register`
+
+注册/刷新 Claude Code 集成。默认创建 symlink 让 Claude Code 加载 emoo skills。
+
+```bash
+emoo skill register              # 注册
+emoo skill register --unregister # 取消注册
+```
+
+#### `emoo skill pipeline` — 自适应搜索流水线
+
+三段式智能搜索流水线（子命令组），自动适配不同客户的数据环境。
+
+```
+emoo skill pipeline knowledge-map    →  生成增强知识图谱 (JSON + MD)
+emoo skill pipeline intent <query>   →  分析意图，输出搜索方案
+emoo skill pipeline search -p plan   →  执行搜索方案，聚合结果
+```
+
+**pipeline knowledge-map** — 扫描工作区，采样文档标题，生成知识图谱。
+
+```bash
+emoo skill pipeline knowledge-map
+emoo skill pipeline knowledge-map --max-sample-per-group 10 -o /tmp/km
+```
+
+**pipeline intent** — 自然语言意图分析，支持中文时间表达（`3月`、`最近7天`、`上周`等）。
+
+```bash
+emoo skill pipeline intent "美罗城店3月营收"
+emoo skill pipeline intent "最近7天品项销售" --top 3 -o plan.json
+```
+
+**pipeline search** — 执行搜索方案，聚合多 app 结果。
+
+```bash
+emoo skill pipeline search -p plan.json
+emoo skill pipeline search -p plan.json --csv output.csv
+# 管道模式
+emoo skill pipeline intent "营收" -o plan.json && emoo skill pipeline search -p plan.json
 ```
 
 ---
@@ -731,9 +806,15 @@ emoo app overview                          遍历文档生成知识地图
 emoo app list                              列出所有 ws_app_key (含文档组数和文档数)
 emoo app doc-groups -k <key>               列出应用的文档组 (分页)
 
-emoo skill knowledge-map                   生成增强知识图谱 (JSON + MD)
-emoo skill intent "查询意图"               分析意图，输出搜索方案
-emoo skill search -p plan.json             执行搜索方案，聚合多 app 结果
+emoo skill init                            初始化 + 注册到 Claude Code
+emoo skill list                            列出所有 skill
+emoo skill show <name>                     显示 skill MD 内容
+emoo skill run <name> [--params ...]       执行 skill 搜索
+emoo skill create <name>                   创建新 skill (脚手架)
+emoo skill register                        注册/取消注册 Claude Code
+emoo skill pipeline knowledge-map          生成增强知识图谱
+emoo skill pipeline intent "查询意图"      分析意图，输出搜索方案
+emoo skill pipeline search -p plan.json    执行搜索方案，聚合多 app 结果
 
 emoo contact list                          获取通讯录成员 (分页+关键词)
 emoo contact update <open_id>              更新成员信息 (用户名/扩展信息)
