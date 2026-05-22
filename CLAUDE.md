@@ -155,7 +155,7 @@ emoo api POST /v1/chat/messages -d '{"query":"hi"}' --dry-run
 
 ```bash
 emoo skill pipeline knowledge-map --max-doc-groups 200 -o /tmp/km
-emoo skill pipeline intent "美罗城店3月营收"
+emoo skill pipeline intent "示例门店店3月营收"
 emoo skill pipeline search -p plan.json --csv output.csv
 ```
 

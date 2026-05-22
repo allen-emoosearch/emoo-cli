@@ -232,8 +232,8 @@ def run(ctx, name, csv_path, max_results, km_path):
 
     \b
     示例:
-      emoo skill run store-revenue --store "美罗城" --month "2026-03"
-      emoo skill run store-revenue --store "美罗城" --csv output.csv
+      emoo skill run store-revenue --store "示例门店" --month "2026-03"
+      emoo skill run store-revenue --store "示例门店" --csv output.csv
       emoo skill run item-analysis --item "红烧肉" --month "2026-03"
     """
     sd = find_skill(name)
@@ -443,11 +443,11 @@ def knowledge_map(ctx, max_sample_per_group, max_doc_groups, output_dir):
 def intent(ctx, query, km_path, top, output_file):
     """分析搜索意图，输出结构化搜索方案.
 
-    QUERY: 自然语言查询，如 "查美罗城店3月营收"
+    QUERY: 自然语言查询，如 "查示例门店店3月营收"
 
     \b
     示例:
-      emoo skill pipeline intent "查美罗城店2026年3月营收"
+      emoo skill pipeline intent "查示例门店店2026年3月营收"
       emoo skill pipeline intent "上周品项销售情况" --top 3
       emoo skill pipeline intent "最近7天员工考勤" -o plan.json
     """

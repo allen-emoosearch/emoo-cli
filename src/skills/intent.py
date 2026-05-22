@@ -137,7 +137,7 @@ def _extract_entities(query: str) -> dict:
         if kw in cleaned:
             topics.append(kw)
 
-    # Split tokens at topic keyword boundaries so "美罗城店营收" → "美罗城店"
+    # Split tokens at topic keyword boundaries so "示例门店店营收" → "示例门店店"
     remaining = cleaned
     for kw in topics:
         remaining = remaining.replace(kw, ' ')
@@ -178,7 +178,7 @@ def analyze_intent(
     """Analyze user query against a knowledge map and produce a search plan.
 
     Args:
-        query: natural-language search intent (e.g. "查美罗城店3月营收")
+        query: natural-language search intent (e.g. "查示例门店店3月营收")
         knowledge_map_path: path to the JSON knowledge map file
 
     Returns:

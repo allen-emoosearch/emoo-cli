@@ -592,9 +592,9 @@ emoo:
     page_size: 200                      # 可选，默认 200
   params:
     store:
-      description: 门店名称（如 美罗城）
+      description: 门店名称（如 示例门店）
       required: true
-      example: 美罗城
+      example: 示例门店
     month:
       description: 月份（如 2026-03）
       required: false
@@ -645,14 +645,14 @@ emoo skill show store-revenue --params-only  # 仅参数 JSON
 
 ```bash
 # 场景类 skill
-emoo skill run store-revenue --store "美罗城" --month "2026-03"
+emoo skill run store-revenue --store "示例门店" --month "2026-03"
 
 # 维度类 skill
 emoo skill run app-filter --keyword "营收" --app_name "天财·POS系统"
 emoo skill run time-filter --keyword "报告" --time "最近7天"
 
 # 导出 CSV
-emoo skill run store-revenue --store "美罗城" --csv output.csv
+emoo skill run store-revenue --store "示例门店" --csv output.csv
 ```
 
 执行流程：模板替换 → app/doc_group 名称解析（知识图谱） → 时间过滤生成 → POST /search → 可选 CSV 导出。
@@ -703,7 +703,7 @@ emoo skill pipeline knowledge-map --max-sample-per-group 10 -o /tmp/km
 **pipeline intent** — 自然语言意图分析，支持中文时间表达（`3月`、`最近7天`、`上周`等）。
 
 ```bash
-emoo skill pipeline intent "美罗城店3月营收"
+emoo skill pipeline intent "示例门店店3月营收"
 emoo skill pipeline intent "最近7天品项销售" --top 3 -o plan.json
 ```
 
