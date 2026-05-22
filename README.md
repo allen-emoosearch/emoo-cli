@@ -422,9 +422,9 @@ emoo base record-list --table-name "线上线索" --page-size 10 --current-page 
 
 ---
 
-### app — 应用概览
+### app — 应用与文档组管理
 
-浏览工作区中所有已连接的应用（ws_app_key），生成知识地图方便搜索前定位数据源。
+浏览工作区中的所有应用（ws_app_key）和文档组，生成知识地图方便搜索前定位数据源。
 
 #### `emoo app overview`
 
@@ -447,13 +447,36 @@ emoo app overview --max-docs 1000 -o my_knowledge_map.md
 
 #### `emoo app list`
 
-快速列出所有 ws_app_key 及所属平台，无需生成完整知识地图。
+调用 `GET /v1/apps` 接口直接列出所有 ws_app_key，含文档组数和文档数。
 
 ```bash
 emoo app list
+emoo --json app list   # JSON 输出完整 ws_app_key
 ```
 
-> **ws_agent_key** 需在 EMOO 管理后台 → Agent 管理 → 复制 Agent Key，API 暂无对应查询端点。
+返回字段：`id`、`ws_app_key`、`title`、`doc_group_count`、`doc_count`。
+
+#### `emoo app doc-groups`
+
+调用 `GET /v1/app/{ws_app_key}/doc-groups` 接口列出应用的文档组（分页）。
+
+| 参数 | 必填 | 默认值 | 说明 |
+|------|:----:|--------|------|
+| `-k, --ws-app-key` | 是 | — | ws_app_key |
+| `--page-size` | 否 | 100 | 每页数量（最大 200） |
+| `--current-page` | 否 | 1 | 页码 |
+
+```bash
+# 列出文档组
+emoo app doc-groups -k 9ecb14f83abf469db9d2d49d584b5fbc
+
+# 分页 + JSON
+emoo --json app doc-groups -k 9ecb14f83abf469db9d2d49d584b5fbc --page-size 10 --current-page 2
+```
+
+返回字段：`app_group_id`、`app_group_name`、`app_group_desc`、`url`、`doc_count`、`created_at`、`updated_at`。
+
+> **ws_agent_key** 需在 EMOO 管理后台 → Agent 管理 → 复制 Agent Key。
 
 ---
 
@@ -573,6 +596,8 @@ emoo app list
 | `200` | 成功 | — |
 | `4083` | API Token 无效 | 重新执行 `emoo auth login` |
 | `4084` | Emoo-User-Id 无效 | 检查 `--user-id` 参数是否正确 |
+| `4008` | 应用不存在 | 检查 `ws_app_key` 是否正确 |
+| `4042` | 无权限访问该应用 | 确认当前用户有权访问此应用 |
 | `4092` | ws_agent_key 不存在 | 检查 Agent Key |
 | `4044` | 对话消息不能为空 | 检查 `-q` 参数 |
 | `4133` | 表不存在 | 检查 `--table-name` 或 `--table-key` 是否正确 |
@@ -619,7 +644,8 @@ emoo auth status                           查看认证状态
 emoo auth set-default-user-id <open_id>    设置默认 User ID (OAuth2)
 
 emoo app overview                          遍历文档生成知识地图
-emoo app list                              列出所有 ws_app_key
+emoo app list                              列出所有 ws_app_key (含文档组数和文档数)
+emoo app doc-groups -k <key>               列出应用的文档组 (分页)
 
 emoo contact list                          获取通讯录成员 (分页+关键词)
 emoo contact update <open_id>              更新成员信息 (用户名/扩展信息)

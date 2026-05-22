@@ -152,31 +152,13 @@ def list(ctx):
     """列出所有 ws_app_key。ws_agent_key 需在管理后台获取。"""
     client = EmooClient(base_url=ctx.obj.get("base_url"), user_id=ctx.obj.get("user_id"))
 
-    seen: dict[str, dict] = {}
-    cursor = ""
-    scan_count = 0
+    resp = client.get("/apps")
+    apps = resp.get("data", [])
 
-    while scan_count < 600:
-        resp = client.post("/data", body={"page_size": 200, "cursor": cursor, "text_format": "plain"})
-        inner = resp.get("data", {})
-        results = inner.get("results", [])
-
-        for r in results:
-            wa = r.get("ws_app", {})
-            key = wa.get("ws_app_key", "")
-            if key and key not in seen:
-                seen[key] = {
-                    "title": wa.get("title", ""),
-                    "app_name": wa.get("app_name", ""),
-                    "app_id": wa.get("id", ""),
-                }
-
-        scan_count += len(results)
-        if not inner.get("has_more") or not inner.get("next_cursor"):
-            break
-        cursor = inner["next_cursor"]
-
-    click.echo(f"\n发现 {len(seen)} 个 ws_app_key (扫描 {scan_count} 篇):\n")
+    if ctx.obj.get("as_json"):
+        import json
+        click.echo(json.dumps(apps, ensure_ascii=False, indent=2))
+        return
 
     from rich.console import Console
     from rich.table import Table
@@ -184,11 +166,65 @@ def list(ctx):
     table = Table(title="工作区应用 (ws_app_key)")
     table.add_column("ws_app_key", style="cyan")
     table.add_column("应用名称")
-    table.add_column("平台")
+    table.add_column("文档组数", justify="right")
+    table.add_column("文档数", justify="right")
     table.add_column("ws_app.id")
-    for key in sorted(seen):
-        info = seen[key]
-        table.add_row(key, info["title"], info["app_name"], str(info["app_id"]))
+    for a in sorted(apps, key=lambda x: x.get("title", "")):
+        table.add_row(
+            a.get("ws_app_key", ""),
+            a.get("title", ""),
+            str(a.get("doc_group_count", "")),
+            str(a.get("doc_count", "")),
+            str(a.get("id", "")),
+        )
     console.print(table)
 
+    click.echo(f"\n共 {len(apps)} 个应用")
     click.echo("\n[dim]ws_agent_key 需在 EMOO 管理后台 → Agent 管理 → 复制 Agent Key[/dim]")
+
+
+@app.command()
+@click.option("--ws-app-key", "-k", required=True, help="ws_app_key (必填)")
+@click.option("--page-size", default=100, help="每页数量 (默认 100, 最大 200)")
+@click.option("--current-page", default=1, help="当前页码 (默认 1)")
+@click.pass_context
+def doc_groups(ctx, ws_app_key, page_size, current_page):
+    """列出应用的文档组 (GET /v1/app/{ws_app_key}/doc-groups)."""
+    if page_size > 200:
+        raise click.BadParameter("page_size 最大 200")
+    client = EmooClient(base_url=ctx.obj.get("base_url"), user_id=ctx.obj.get("user_id"))
+
+    resp = client.get(f"/app/{ws_app_key}/doc-groups", params={
+        "page_size": page_size,
+        "current_page": current_page,
+    })
+
+    data = resp.get("data", {})
+    results = data.get("results", [])
+    total = data.get("total", len(results))
+
+    if ctx.obj.get("as_json"):
+        import json
+        click.echo(json.dumps(data, ensure_ascii=False, indent=2))
+        return
+
+    from rich.console import Console
+    from rich.table import Table
+    console = Console()
+    table = Table(title=f"文档组 (ws_app_key={ws_app_key})")
+    table.add_column("app_group_id", style="cyan")
+    table.add_column("名称")
+    table.add_column("描述")
+    table.add_column("文档数", justify="right")
+    table.add_column("更新时间")
+    for g in results:
+        table.add_row(
+            g.get("app_group_id", ""),
+            g.get("app_group_name", ""),
+            (g.get("app_group_desc") or "")[:60],
+            str(g.get("doc_count", "")),
+            (g.get("updated_at") or "")[:19],
+        )
+    console.print(table)
+
+    click.echo(f"\n第 {current_page}/{data.get('total_pages', 1)} 页, 共 {total} 个文档组")
