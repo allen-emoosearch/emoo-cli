@@ -1,5 +1,7 @@
 """App overview: scan workspace and generate knowledge map of ws_app_key content."""
 
+import json
+import os
 import time
 from collections import defaultdict
 
@@ -134,6 +136,16 @@ def overview(ctx, max_docs, output_file):
         f.write("\n".join(lines))
 
     _progress(f"知识地图已生成: {output_file}")
+
+    if ctx.obj.get("as_json"):
+        click.echo(json.dumps({
+            "generated_at": gen_time,
+            "total_docs": total,
+            "app_count": len(app_summaries),
+            "output_file": os.path.abspath(output_file),
+            "apps": app_summaries,
+        }, ensure_ascii=False, indent=2))
+        return
 
     # Print summary
     from rich.console import Console
