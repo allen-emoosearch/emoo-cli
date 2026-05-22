@@ -1,0 +1,179 @@
+{
+  "auth.token": {
+    "method": "GET",
+    "path": "/auth/token",
+    "auth_required": false,
+    "description": "获取 API 访问令牌，默认有效期 2 小时（7200 秒）",
+    "params": [
+      {"name": "grant_type", "type": "string", "required": false, "desc": "固定为 client_credentials"},
+      {"name": "client_id", "type": "string", "required": true, "desc": "客户端标识"},
+      {"name": "client_secret", "type": "string", "required": true, "desc": "客户端密钥"}
+    ],
+    "response": {
+      "data.access_token": "string — 访问令牌",
+      "data.token_type": "string — Bearer",
+      "data.expires_in": "integer — 有效时间(秒)"
+    }
+  },
+  "contact.list": {
+    "method": "GET",
+    "path": "/ws-user",
+    "auth_required": true,
+    "user_id_required": false,
+    "description": "获取通讯录成员列表（分页）",
+    "params": [
+      {"name": "page_size", "type": "integer", "required": false, "desc": "每页数据量，最大 100，默认 50"},
+      {"name": "current_page", "type": "integer", "required": false, "desc": "当前页码，从 1 开始"},
+      {"name": "keyword", "type": "string", "required": false, "desc": "搜索关键词，不传则返回全部成员"}
+    ],
+    "response": {
+      "data.total": "integer — 总数据量",
+      "data.results[]": "WsUserDetailInfo — open_id, user_id, ws_username, ws_user_type(1=普通/2=管理员/3=拥有者), email, mobile_num"
+    }
+  },
+  "contact.update": {
+    "method": "PUT",
+    "path": "/ws-user",
+    "auth_required": true,
+    "user_id_required": false,
+    "description": "更新成员信息",
+    "body": [
+      {"name": "open_id", "type": "string", "required": true, "desc": "成员在当前工作区中的唯一标识"},
+      {"name": "ws_username", "type": "string", "required": false, "desc": "工作区中的显示名称"},
+      {"name": "ext_info", "type": "object", "required": false, "desc": "扩展信息（自由格式 key-value）"}
+    ]
+  },
+  "data.search": {
+    "method": "POST",
+    "path": "/search",
+    "auth_required": true,
+    "user_id_required": true,
+    "description": "搜索企业绑定的所有数据源（不支持个人数据源）",
+    "body": [
+      {"name": "keyword", "type": "string", "required": true, "desc": "搜索关键词"},
+      {"name": "page_size", "type": "integer", "required": true, "desc": "每页条数（最大 100）"},
+      {"name": "current_page", "type": "integer", "required": true, "desc": "页码，从 1 开始"},
+      {"name": "text_format", "type": "string", "required": false, "desc": "plain（默认）或 markdown"},
+      {"name": "ws_agent_key", "type": "string", "required": false, "desc": "Dify/Coze/Timus 平台的 Agent Key"},
+      {"name": "filter_conditions", "type": "array", "required": false, "desc": "二维数组 — 外层 OR，内层 AND"}
+    ],
+    "response": {
+      "data.total": "integer — 总记录数",
+      "data.results[]": "DocDetailInfo — id, title, url, content, app_created_at, app_updated_at, ws_app, doc_group"
+    },
+    "filter_fields": ["id", "app_doc_id", "doc_group.id", "doc_group.app_group_id", "app_updated_at", "app_created_at", "ws_app.ws_app_key"],
+    "filter_operators": ["eq", "neq", "in", "nin", "gte", "lte"]
+  },
+  "data.get": {
+    "method": "POST",
+    "path": "/data",
+    "auth_required": true,
+    "user_id_required": true,
+    "description": "游标分页获取文档数据",
+    "body": [
+      {"name": "page_size", "type": "integer", "required": true, "desc": "每页条数（最大 200）"},
+      {"name": "cursor", "type": "string", "required": false, "desc": "分页游标，空则从头开始"},
+      {"name": "text_format", "type": "string", "required": false, "desc": "plain 或 markdown"},
+      {"name": "filter_conditions", "type": "array", "required": false, "desc": "过滤条件，结构同 search"}
+    ]
+  },
+  "chat.list": {
+    "method": "GET",
+    "path": "/chat",
+    "auth_required": true,
+    "user_id_required": true,
+    "description": "获取用户对话列表（最多前 50 个）",
+    "params": [
+      {"name": "page_size", "type": "integer", "required": false, "desc": "每页条数，默认 50"},
+      {"name": "current_page", "type": "integer", "required": false, "desc": "页码，从 1 开始"}
+    ],
+    "response": {
+      "data.results[]": "id, title, created_at, updated_at"
+    }
+  },
+  "chat.create": {
+    "method": "POST",
+    "path": "/chat",
+    "auth_required": true,
+    "user_id_required": true,
+    "description": "创建新对话",
+    "body": [
+      {"name": "title", "type": "string", "required": false, "desc": "对话标题（可选）"}
+    ],
+    "response": {
+      "data.chat_id": "integer — 新建对话 ID"
+    }
+  },
+  "chat.send": {
+    "method": "POST",
+    "path": "/chat/messages",
+    "auth_required": true,
+    "user_id_required": true,
+    "description": "发送对话消息并获取 AI 回复（不支持 SSE 流式）",
+    "body": [
+      {"name": "query", "type": "string", "required": true, "desc": "提问/消息内容"},
+      {"name": "chat_id", "type": "integer", "required": false, "desc": "对话 ID，为空则创建新对话"},
+      {"name": "file_list", "type": "array", "required": false, "desc": "引用文件列表，最多 10 个"},
+      {"name": "ws_agent_key", "type": "string", "required": false, "desc": "指定 Agent 回复"},
+      {"name": "stream", "type": "boolean", "required": false, "desc": "是否 SSE 流式（当前不支持）"}
+    ],
+    "response": {
+      "data.chat_id": "integer — 对话 ID",
+      "data.complete_response": "string — AI 回复内容",
+      "data.message_id": "string — 消息 ID"
+    }
+  },
+  "message.push": {
+    "method": "POST",
+    "path": "/message",
+    "auth_required": true,
+    "user_id_required": true,
+    "description": "主动推送消息给指定用户",
+    "body": [
+      {"name": "message_type", "type": "string", "required": true, "desc": "normal（普通通知）或 agent（Agent 推送）"},
+      {"name": "content", "type": "string", "required": true, "desc": "消息正文，最长 300 字符"},
+      {"name": "emoo_user_id", "type": "string", "required": false, "desc": "接收者的 Emoo 用户 ID"},
+      {"name": "normal_message_info.from_title", "type": "string", "required": "条件", "desc": "normal 类型必填 — 来源名称"},
+      {"name": "normal_message_info.from_image_url", "type": "string", "required": false, "desc": "来源头像 URL"},
+      {"name": "normal_message_info.detail_link", "type": "string", "required": false, "desc": "详情链接"},
+      {"name": "agent_message_info.ws_agent_key", "type": "string", "required": "条件", "desc": "agent 类型必填 — Agent Key"},
+      {"name": "agent_message_info.chat_id", "type": "string", "required": false, "desc": "目标对话 ID"}
+    ]
+  },
+  "base.record-create": {
+    "method": "POST",
+    "path": "/data/records",
+    "auth_required": true,
+    "user_id_required": true,
+    "description": "插入记录到数据表（最多 100 条）",
+    "body": [
+      {"name": "table_name", "type": "string", "required": "条件", "desc": "表显示名称（与 table_key 二选一）"},
+      {"name": "table_key", "type": "string", "required": "条件", "desc": "表系统标识（与 table_name 二选一）"},
+      {"name": "records", "type": "array", "required": true, "desc": "记录列表，1-100 条"}
+    ]
+  },
+  "app.list": {
+    "method": "GET",
+    "path": "/apps",
+    "auth_required": true,
+    "user_id_required": false,
+    "description": "列出工作区所有应用",
+    "response": {
+      "data[]": "id, ws_app_key, title, doc_group_count, doc_count"
+    }
+  },
+  "app.doc-groups": {
+    "method": "GET",
+    "path": "/app/{ws_app_key}/doc-groups",
+    "auth_required": true,
+    "user_id_required": false,
+    "description": "列出指定应用的文档组（分页）",
+    "params": [
+      {"name": "page_size", "type": "integer", "required": false, "desc": "每页数量，最大 200"},
+      {"name": "current_page", "type": "integer", "required": false, "desc": "页码，从 1 开始"}
+    ],
+    "path_params": [
+      {"name": "ws_app_key", "type": "string", "required": true, "desc": "应用 Key"}
+    ]
+  }
+}

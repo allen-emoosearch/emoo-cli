@@ -38,6 +38,85 @@ emoo chat send -q "你好"
 emoo auth status
 ```
 
+## 架构：三层命令模型
+
+EMOO CLI 借鉴 Lark CLI 架构，采用三层命令模型 + Agent 原生契约：
+
+```
+L3 透传:  emoo api GET/POST/PUT/DELETE /v1/...      一条命令覆盖 100% API
+L2 生成:  emoo data search / chat send / ...         结构化命令，与端点 1:1
+L1 快捷:  emoo skill run <name> / pipeline           智能默认值、MD 驱动
+```
+
+| 层 | 谁写 | 覆盖 | 价值 |
+|---|:---:|:---:|------|
+| L3 `api` | 自动生成 | 100% API | 无需等待封装，第一天即可用 |
+| L2 域命令 | 手写 | 16 端点 | 结构化、参数校验、Rich 表格 |
+| L1 skill | 用户 + 手写 | 高频场景 | 智能默认值、CSV 导出、Claude Code 集成 |
+
+### Agent 原生契约
+
+- **stdout 数据，stderr 提示** — `--json` 模式下绝不混合
+- **结构化错误** — 每条错误带 `hint` 字段告诉 Agent 怎么修
+- **`emoo schema`** — 先查再调，不猜字段
+- **`--dry-run`** — 副作用命令可预览不执行
+
+---
+
+### L3 透传: `emoo api`
+
+通用 API 透传命令，覆盖全部 EMOO 端点。使用现有鉴权链，无需单独配置。
+
+```bash
+# GET 请求
+emoo api GET /v1/apps
+emoo api GET "/v1/app/{ws_app_key}/doc-groups?page_size=10"
+
+# POST 请求 (JSON body)
+emoo api POST /v1/search -d '{"keyword":"test","page_size":5,"current_page":1}'
+
+# 从文件读取 body
+emoo api POST /v1/search -d ./search-body.json
+
+# 从 stdin 读取 body
+echo '{"keyword":"test","page_size":5,"current_page":1}' | emoo api POST /v1/search -d -
+
+# Dry-run 预览 (不执行)
+emoo api POST /v1/chat/messages -d '{"query":"hi"}' --dry-run
+
+# JSON 输出
+emoo --json api GET /v1/apps | jq '.data[].title'
+```
+
+### Schema 自省: `emoo schema`
+
+给 Agent "先查再调、不猜字段"的命令。列出所有端点或查看指定端点的参数、请求体、响应、权限。
+
+```bash
+# 列出所有端点
+emoo schema list
+
+# 查看端点详情
+emoo schema data.search          # 参数、Body、响应字段、过滤条件
+emoo schema chat.send            # Body 参数、认证要求
+emoo schema search               # 模糊匹配（search → data.search）
+
+# JSON 输出
+emoo --json schema data.search   # 机器可读，Agent 可编程消费
+```
+
+### --dry-run
+
+对有副作用的命令预览请求而不执行：
+
+```bash
+emoo chat send -q "你好" --dry-run
+emoo message push -t normal -c "通知" --from-title "test" --dry-run
+emoo api POST /v1/data/records -d '{"table_name":"t","records":[...]}' --dry-run
+```
+
+---
+
 ## 认证机制
 
 支持两种认证方式：
@@ -802,9 +881,14 @@ emoo auth login [--api-key <key>]          登录 (API Key 推荐 / OAuth2)
 emoo auth status                           查看认证状态
 emoo auth set-default-user-id <open_id>    设置默认 User ID (OAuth2)
 
-emoo app overview                          遍历文档生成知识地图
+emoo api GET /v1/<path>                    通用 API 透传 (L3, 覆盖 100%)
+emoo api POST /v1/<path> -d <json>         通用 POST 透传
+emoo schema list                           列出所有 API 端点
+emoo schema <endpoint>                     查看端点参数/响应/权限
+
 emoo app list                              列出所有 ws_app_key (含文档组数和文档数)
 emoo app doc-groups -k <key>               列出应用的文档组 (分页)
+emoo app overview                          遍历文档生成知识地图
 
 emoo skill init                            初始化 + 注册到 Claude Code
 emoo skill list                            列出所有 skill

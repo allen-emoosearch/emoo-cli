@@ -3,25 +3,10 @@
 import time
 from typing import Optional
 
-import click
 import requests
 
 from . import config
-
-ERROR_CODES = {
-    4083: "API Token 无效",
-    4084: "Emoo-User-Id 无效，应为 open_id（可用 emoo contact list 获取）",
-    4092: "ws_agent_key 不存在",
-    4044: "对话消息不能为空",
-}
-
-HTTP_STATUS_MESSAGES = {
-    400: "请求参数错误",
-    401: "认证失败，请检查 API Key 或重新登录",
-    403: "无权限访问",
-    404: "资源不存在",
-    500: "服务器内部错误",
-}
+from .errors import AuthError, from_api_response, EmooError
 
 
 class EmooClient:
@@ -40,14 +25,15 @@ class EmooClient:
             self._refresh_token()
         else:
             expires = config.load().get("expires_at", 0)
-            if time.time() > expires - 60:  # 60s buffer
+            if time.time() > expires - 60:
                 self._refresh_token()
 
     def _refresh_token(self) -> None:
         client_id, client_secret = config.get_client_credentials()
         if not client_id or not client_secret:
-            raise click.ClickException(
-                "未配置 client_id/client_secret，请先运行: emoo auth login"
+            raise AuthError(
+                message="未配置 client_id/client_secret",
+                hint="请先运行: emoo auth login --client-id <id> --client-secret <secret>",
             )
 
         resp = requests.get(
@@ -61,8 +47,10 @@ class EmooClient:
         )
         body = resp.json()
         if body.get("code") != 200:
-            raise click.ClickException(
-                f"获取 token 失败: [{body.get('code')}] {body.get('message')}"
+            raise from_api_response(
+                code=body.get("code", 0),
+                http_status=resp.status_code,
+                message=body.get("message", "获取 token 失败"),
             )
 
         data = body["data"]
@@ -79,24 +67,27 @@ class EmooClient:
             h["Emoo-User-Id"] = self.user_id
         return h
 
-    def _handle_response(self, resp: requests.Response) -> dict:
+    def _check_response(self, resp: requests.Response) -> dict:
+        """Check API response and return body or raise structured error."""
         body = resp.json()
         code = body.get("code")
         if code is not None and code != 200:
-            msg = ERROR_CODES.get(code)
-            if msg:
-                raise click.ClickException(f"[{code}] {msg}")
-            detail = body.get("message", "") or body.get("error", "") or str(body)
-            raise click.ClickException(f"[{code}] 服务器错误: {detail}")
+            raise from_api_response(
+                code=code,
+                http_status=resp.status_code,
+                message=body.get("message", "") or body.get("error", ""),
+            )
         if code is None and not resp.ok:
-            http_msg = HTTP_STATUS_MESSAGES.get(resp.status_code, f"HTTP {resp.status_code}")
-            detail = body.get("message", "") or body.get("error", "") or str(body)
-            raise click.ClickException(f"[{resp.status_code}] {http_msg}: {detail}")
+            raise from_api_response(
+                code=resp.status_code,
+                http_status=resp.status_code,
+                message=body.get("message", "") or body.get("error", ""),
+            )
         return body
 
     def _request(self, method: str, path: str,
                  params: Optional[dict] = None, body: Optional[dict] = None) -> dict:
-        """Make HTTP request, auto-refresh token on 4083 and retry once."""
+        """Make HTTP request, auto-refresh token on auth error and retry once."""
         self._ensure_token()
         resp = requests.request(
             method,
@@ -107,9 +98,9 @@ class EmooClient:
             timeout=60,
         )
         try:
-            return self._handle_response(resp)
-        except click.ClickException as e:
-            if "4083" in str(e):
+            return self._check_response(resp)
+        except AuthError:
+            if not self._use_api_key:
                 self._refresh_token()
                 resp = requests.request(
                     method,
@@ -119,8 +110,13 @@ class EmooClient:
                     json=body,
                     timeout=60,
                 )
-                return self._handle_response(resp)
+                return self._check_response(resp)
             raise
+
+    def request(self, method: str, path: str,
+                params: Optional[dict] = None, body: Optional[dict] = None) -> dict:
+        """Public raw request method (for L3 passthrough)."""
+        return self._request(method, path, params=params, body=body)
 
     def get(self, path: str, params: Optional[dict] = None) -> dict:
         return self._request("GET", path, params=params)
@@ -130,3 +126,6 @@ class EmooClient:
 
     def put(self, path: str, body: dict | list | None = None) -> dict:
         return self._request("PUT", path, body=body)
+
+    def delete(self, path: str, body: Optional[dict] = None) -> dict:
+        return self._request("DELETE", path, body=body)

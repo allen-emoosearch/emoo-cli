@@ -15,7 +15,10 @@ dependencies = [
 ]
 
 [project.scripts]
-emoo = "src.cli:cli"
+emoo = "src.cli:main"
 
 [tool.setuptools.packages.find]
 include = ["src*"]
+
+[tool.setuptools.package-data]
+"src.commands" = ["*.json"]
