@@ -8,6 +8,14 @@ from ..client import EmooClient
 from ..formatters import output
 
 
+def _progress(msg: str, **kwargs) -> None:
+    """Write progress/info to stderr so stdout stays clean for JSON consumers."""
+    click.echo(msg, err=True, **kwargs)
+
+
+API_RESULT_CAP = 500
+
+
 def _parse_filter(ctx, param, value):
     """Parse --filter from JSON string or file path.  Auto-wraps dict into [[...]] format."""
     if value is None:
@@ -15,7 +23,6 @@ def _parse_filter(ctx, param, value):
     try:
         parsed = json.loads(value)
     except json.JSONDecodeError as json_err:
-        # Try as file path only if value looks like a file path (starts with ./ ../ / or ~/)
         looks_like_path = value.startswith(("./", "../", "/", "~/"))
         if looks_like_path:
             try:
@@ -34,12 +41,6 @@ def _parse_filter(ctx, param, value):
     except Exception:
         raise click.BadParameter(f"无法解析 filter: {value}")
 
-    # Auto-wrap conveniences:
-    #    {"field":"ws_app.ws_app_key","operator":"eq","value":"abc"}
-    #        → [[{"field":"ws_app.ws_app_key","operator":"eq","value":"abc"}]]
-    #    [{"field":...,"operator":...,"value":...}]
-    #        → [[{"field":...,"operator":...,"value":...}]]
-    #    [[{...}],[{...}]]  →  passed through as-is
     if isinstance(parsed, dict):
         parsed = [[parsed]]
     elif isinstance(parsed, list) and len(parsed) > 0 and isinstance(parsed[0], dict) and 'field' in parsed[0]:
@@ -58,11 +59,44 @@ def _validate_page_size(ctx, param, value):
     return value
 
 
+def _auto_paginate_search(client, body, max_results, ctx):
+    """Auto-paginate through /search results until max_results or exhausted."""
+    all_results = []
+    page = 1
+    api_total = 0
+
+    while True:
+        body["current_page"] = page
+        resp = client.post("/search", body=body)
+        results = resp.get("data", {}).get("results", [])
+        api_total = resp.get("data", {}).get("total", 0)
+
+        if not results:
+            break
+
+        all_results.extend(results)
+
+        if len(all_results) >= max_results:
+            all_results = all_results[:max_results]
+            break
+
+        if len(all_results) >= api_total or len(results) < body["page_size"]:
+            break
+
+        page += 1
+
+    resp["data"]["results"] = all_results
+    resp["data"]["total"] = len(all_results)
+    resp["data"]["_paginated"] = True
+    return resp, api_total == API_RESULT_CAP and len(all_results) < api_total
+
+
 @data.command()
 @click.option("--keyword", "-k", required=True, help="搜索关键词")
 @click.option("--page-size", default=20, callback=_validate_page_size, help="每页条数 (最大200)")
 @click.option("--current-page", default=1, help="页码")
-@click.option("--text-format", type=click.Choice(["plain", "markdown"]), default="plain", help="文本格式 (markdown 返回语雀 HTML)")
+@click.option("--text-format", type=click.Choice(["plain", "markdown"]), default="plain",
+              help="文本格式 (markdown 返回语雀 HTML)")
 @click.option("--ws-agent-key", default=None, help="Agent Key (Dify/Coze/Timus 平台需传入)")
 @click.option("--filter", "-f", "filter_conditions", callback=_parse_filter, default=None,
               help='过滤条件，四种格式:\n'
@@ -74,11 +108,28 @@ def _validate_page_size(ctx, param, value):
                    'app_created_at, app_updated_at, ws_app.id, ws_app.app_id, '
                    'ws_app.ws_app_key, author_ws_app_user_id\n'
                    '运算符: eq, neq, in, nin, gte, lte')
+@click.option("--max-results", type=int, default=None,
+              help=f"最多返回条数，自动翻页 (API 单次上限 {API_RESULT_CAP})")
 @click.pass_context
-def search(ctx, keyword, page_size, current_page, text_format, ws_agent_key, filter_conditions):
-    """搜索数据."""
+def search(ctx, keyword, page_size, current_page, text_format, ws_agent_key,
+           filter_conditions, max_results):
+    """搜索数据.
+
+    不加 --max-results 时单次查询，结果超过 {API_RESULT_CAP} 条会输出截断警告。
+    加 --max-results 时自动翻页，直到拿到足够数据或数据源耗尽。
+
+    \b
+    示例:
+      emoo data search -k "上海" --max-results 2000
+      emoo data search -k "报告" -f '[[{{"field":"ws_app.ws_app_key","operator":"eq","value":"abc"}}]]'
+    """.format(API_RESULT_CAP=API_RESULT_CAP)
     if page_size > 200:
         raise click.BadParameter(f"page-size 最大 200，当前为 {page_size}")
+
+    # Use max page_size for auto-pagination to minimise round-trips
+    if max_results and page_size < 200:
+        page_size = min(200, max_results)
+
     body = {
         "page_size": page_size,
         "current_page": current_page,
@@ -91,21 +142,43 @@ def search(ctx, keyword, page_size, current_page, text_format, ws_agent_key, fil
         body["filter_conditions"] = filter_conditions
 
     client = EmooClient(base_url=ctx.obj.get("base_url"), user_id=ctx.obj.get("user_id"))
+
+    if max_results:
+        resp, _ = _auto_paginate_search(client, dict(body), max_results, ctx)
+        output(resp, as_json=ctx.obj.get("as_json", False))
+        return
+
     resp = client.post("/search", body=body)
+    results = resp.get("data", {}).get("results", [])
+    total = resp.get("data", {}).get("total", 0)
+
+    if total >= API_RESULT_CAP and len(results) >= page_size:
+        _progress(
+            f"⚠ 结果可能不完整: API 单次上限 {API_RESULT_CAP} 条，当前已返回 {len(results)} 条。"
+        )
+        _progress(f"  使用 --max-results <N> 自动翻页获取更多 (如 --max-results 2000)，或按日期分段查询。")
+
     output(resp, as_json=ctx.obj.get("as_json", False))
 
 
 @data.command()
 @click.option("--page-size", default=50, callback=_validate_page_size, help="每页条数 (最大200)")
 @click.option("--cursor", default="", help="分页游标")
-@click.option("--text-format", type=click.Choice(["plain", "markdown"]), default="plain", help="文本格式 (markdown 返回语雀 HTML)")
+@click.option("--text-format", type=click.Choice(["plain", "markdown"]), default="plain",
+              help="文本格式 (markdown 返回语雀 HTML)")
 @click.option("--filter", "-f", "filter_conditions", callback=_parse_filter, default=None,
               help='过滤条件，四种格式同上 search')
+@click.option("--max-results", type=int, default=None,
+              help=f"最多返回条数，自动翻页 (API 单次上限 {API_RESULT_CAP})")
 @click.pass_context
-def get(ctx, page_size, cursor, text_format, filter_conditions):
-    """获取数据 (游标分页)."""
+def get(ctx, page_size, cursor, text_format, filter_conditions, max_results):
+    """获取数据 (游标分页).
+
+    不加 --max-results 时单次查询。加 --max-results 时自动用游标翻页。
+    """
     if page_size > 200:
         raise click.BadParameter(f"page-size 最大 200，当前为 {page_size}")
+
     body = {
         "page_size": page_size,
         "cursor": cursor,
@@ -115,5 +188,34 @@ def get(ctx, page_size, cursor, text_format, filter_conditions):
         body["filter_conditions"] = filter_conditions
 
     client = EmooClient(base_url=ctx.obj.get("base_url"), user_id=ctx.obj.get("user_id"))
+
+    if max_results:
+        if page_size < 200:
+            page_size = min(200, max_results)
+            body["page_size"] = page_size
+
+        all_results = []
+        current_cursor = cursor
+        while True:
+            body["cursor"] = current_cursor
+            resp = client.post("/data", body=body)
+            data_block = resp.get("data", {})
+            results = data_block.get("results", [])
+            if not results:
+                break
+            all_results.extend(results)
+            if len(all_results) >= max_results:
+                all_results = all_results[:max_results]
+                break
+            if not data_block.get("has_more") or not data_block.get("next_cursor"):
+                break
+            current_cursor = data_block["next_cursor"]
+
+        resp["data"]["results"] = all_results
+        resp["data"]["total"] = len(all_results)
+        resp["data"]["_paginated"] = True
+        output(resp, as_json=ctx.obj.get("as_json", False))
+        return
+
     resp = client.post("/data", body=body)
     output(resp, as_json=ctx.obj.get("as_json", False))
