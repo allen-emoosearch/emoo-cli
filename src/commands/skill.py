@@ -297,7 +297,12 @@ def run(ctx, name, csv_path, max_results, km_path):
             click.echo(f"无结果 — 关键词: '{outcome['keyword']}'")
             return
 
-        click.echo(f"\n关键词: '{outcome['keyword']}' | 共 {outcome['total']} 条结果")
+        flags = ""
+        if outcome.get("_paginated"):
+            flags += " | 自动翻页"
+        if outcome.get("_truncated"):
+            flags += " | ⚠ 已达API硬上限"
+        click.echo(f"\n关键词: '{outcome['keyword']}' | 共 {outcome['total']} 条结果{flags}")
 
         from rich.console import Console
         from rich.table import Table

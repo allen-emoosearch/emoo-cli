@@ -12,6 +12,8 @@ from typing import Any, Optional
 
 from .loader import SkillDef
 
+API_RESULT_CAP = 500
+
 
 def _resolve_knowledge_map(km_path: str = "emoo_knowledge_map.json") -> Optional[dict]:
     """Load knowledge map JSON if it exists."""
@@ -196,22 +198,55 @@ def run_skill(client, skill: SkillDef, user_params: dict[str, str],
                 elif time_filters:
                     filters.append(time_filters)
 
-    # Step 5: execute search
+    # Step 5: execute search with auto-pagination
+    page_size = min(skill.page_size, 200)
     body: dict[str, Any] = {
         "keyword": keyword,
-        "page_size": min(skill.page_size, max_results),
+        "page_size": min(page_size, max_results),
         "current_page": 1,
         "text_format": "plain",
     }
     if filters:
         body["filter_conditions"] = filters
 
+    all_results: list[dict] = []
+    api_total = 0
+    page = 1
+
     try:
-        resp = client.post("/search", body=body)
-        data = resp.get("data", {})
-        results = data.get("results", [])
-        outcome["results"] = results
-        outcome["total"] = data.get("total", len(results))
+        while True:
+            body["current_page"] = page
+            resp = client.post("/search", body=body)
+            data = resp.get("data", {})
+            results = data.get("results", [])
+            api_total = data.get("total", 0)
+
+            if not results:
+                break
+
+            all_results.extend(results)
+
+            if len(all_results) >= max_results:
+                all_results = all_results[:max_results]
+                break
+
+            if len(all_results) >= api_total or len(results) < body["page_size"]:
+                break
+
+            page += 1
+
+        outcome["results"] = all_results
+        outcome["total"] = len(all_results)
+
+        if page > 1:
+            outcome["_paginated"] = True
+
+        if api_total == API_RESULT_CAP and len(all_results) >= API_RESULT_CAP:
+            outcome["_truncated"] = True
+            outcome["errors"].append(
+                f"search 端点硬上限 {API_RESULT_CAP} 条，自动翻页也无法突破。"
+                f"建议用 emoo data get (游标翻页无此限制) 配合日期过滤分段拉取。"
+            )
     except Exception as e:
         outcome["errors"].append(f"搜索执行失败: {e}")
 
