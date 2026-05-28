@@ -21,6 +21,7 @@ from ..skills.loader import (
 from ..skills.runner import run_skill, export_skill_csv
 from ..skills.registry import (
     ensure_skills_dir, register_symlink, is_registered, unregister,
+    copy_example_skills,
 )
 
 
@@ -83,17 +84,27 @@ def init(no_register):
     skills_dir = ensure_skills_dir()
     click.echo(f"Skills 目录: {skills_dir}")
 
+    # Copy example skills from package
+    copied = copy_example_skills()
+    if copied:
+        click.echo(f"\n已安装 {len(copied)} 个示例 skill:")
+        for f in copied:
+            click.echo(f"  • {os.path.basename(f)}")
+    else:
+        click.echo("\n(示例 skill 已存在，跳过)")
+
     if no_register:
-        click.echo("已跳过 Claude Code 注册 (--no-register)")
+        click.echo("\n已跳过 Claude Code 注册 (--no-register)")
         return
 
     ok, msg = register_symlink()
     if ok:
-        click.echo(f"  {msg}")
+        click.echo(f"\n{msg}")
     else:
-        click.echo(f"  [警告] {msg}", err=True)
+        click.echo(f"\n[警告] {msg}", err=True)
 
-    click.echo("\n使用 emoo skill create <name> 创建新 skill")
+    click.echo("\n使用 emoo skill list 查看所有 skill")
+    click.echo("使用 emoo skill run <name> 执行 skill")
 
 
 # ── register ────────────────────────────────────────────────────────────────

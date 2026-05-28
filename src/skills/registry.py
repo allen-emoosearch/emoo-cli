@@ -2,11 +2,15 @@
 
 import os
 import shutil
+from glob import glob
 from pathlib import Path
 
 EMOO_SKILLS_DIR = os.path.expanduser("~/.emoo/skills")
 CLAUDE_SKILLS_DIR = os.path.expanduser("~/.claude/skills")
 CLAUDE_EMOO_LINK = os.path.join(CLAUDE_SKILLS_DIR, "emoo")
+
+# Package examples directory (relative to this file)
+_EXAMPLES_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "examples")
 
 
 def is_registered() -> bool:
@@ -60,3 +64,28 @@ def ensure_skills_dir() -> str:
     """Create ~/.emoo/skills/ if missing.  Returns the path."""
     os.makedirs(EMOO_SKILLS_DIR, exist_ok=True)
     return EMOO_SKILLS_DIR
+
+
+def copy_example_skills(overwrite: bool = False) -> list[str]:
+    """Copy example skill MD files from the package to ~/.emoo/skills/.
+
+    Args:
+        overwrite: if True, overwrite existing files.
+
+    Returns:
+        list of copied file paths (only newly copied files).
+    """
+    os.makedirs(EMOO_SKILLS_DIR, exist_ok=True)
+    copied = []
+
+    if not os.path.isdir(_EXAMPLES_DIR):
+        return copied
+
+    for src in sorted(glob(os.path.join(_EXAMPLES_DIR, "*.md"))):
+        dst = os.path.join(EMOO_SKILLS_DIR, os.path.basename(src))
+        if os.path.exists(dst) and not overwrite:
+            continue
+        shutil.copy2(src, dst)
+        copied.append(dst)
+
+    return copied
