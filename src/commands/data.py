@@ -75,6 +75,7 @@ def _auto_paginate_search(client, body, max_results, ctx):
             break
 
         all_results.extend(results)
+        _progress(f"  已获取 {len(all_results)} 条 (第 {page} 页)")
 
         if len(all_results) >= max_results:
             all_results = all_results[:max_results]
@@ -184,11 +185,14 @@ def search(ctx, keyword, page_size, current_page, text_format, ws_agent_key,
               help='过滤条件，四种格式同上 search')
 @click.option("--max-results", type=int, default=None,
               help="最多返回条数，游标自动翻页直到拿满或数据源耗尽 (无 500 硬上限)")
+@click.option("--stream", "stream_mode", is_flag=True, default=False,
+              help="流式输出 (JSON Lines 格式，每行一条记录，适合大数据量管道处理)")
 @click.pass_context
-def get(ctx, page_size, cursor, text_format, filter_conditions, max_results):
+def get(ctx, page_size, cursor, text_format, filter_conditions, max_results, stream_mode):
     """获取数据 (游标分页).
 
     不加 --max-results 时单次查询。加 --max-results 时自动用游标翻页。
+    --stream 模式输出 JSON Lines，适合管道渐进处理大数据集。
     """
     if page_size > 200:
         raise click.BadParameter(f"page-size 最大 200，当前为 {page_size}")
@@ -203,14 +207,18 @@ def get(ctx, page_size, cursor, text_format, filter_conditions, max_results):
 
     client = EmooClient(base_url=ctx.obj.get("base_url"), user_id=ctx.obj.get("user_id"))
 
-    if max_results:
+    if max_results or stream_mode:
+        limit = max_results or 10_000_000
+        if not max_results:
+            _progress("流式模式: 将拉取全部数据直到数据源耗尽...")
         if page_size < 200:
-            page_size = min(200, max_results)
+            page_size = min(200, limit)
             body["page_size"] = page_size
 
         all_results = []
         current_cursor = cursor
         page_count = 0
+        stream_total = 0
         incomplete = False
         while True:
             body["cursor"] = current_cursor
@@ -220,14 +228,30 @@ def get(ctx, page_size, cursor, text_format, filter_conditions, max_results):
             page_count += 1
             if not results:
                 break
-            all_results.extend(results)
-            if len(all_results) >= max_results:
-                all_results = all_results[:max_results]
+
+            if stream_mode:
+                for r in results:
+                    click.echo(json.dumps(r, ensure_ascii=False))
+                stream_total += len(results)
+                _progress(f"  已输出 {stream_total} 条 (第 {page_count} 页)")
+            else:
+                all_results.extend(results)
+                _progress(f"  已获取 {len(all_results)} 条 (第 {page_count} 页)")
+
+            if not stream_mode and len(all_results) >= limit:
+                all_results = all_results[:limit]
                 incomplete = data_block.get("has_more", False)
                 break
             if not data_block.get("has_more") or not data_block.get("next_cursor"):
                 break
+            if stream_mode and max_results and stream_total >= max_results:
+                _progress(f"  已达到 max_results={max_results}，停止")
+                break
             current_cursor = data_block["next_cursor"]
+
+        if stream_mode:
+            _progress(f"流式输出完成，共 {stream_total} 条，{page_count} 页")
+            return
 
         resp["data"]["results"] = all_results
         resp["data"]["total"] = len(all_results)

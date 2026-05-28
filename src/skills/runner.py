@@ -7,12 +7,18 @@ import csv
 import json
 import os
 import re
+import sys
 from datetime import datetime, timedelta
 from typing import Any, Optional
 
 from .loader import SkillDef
 
 API_RESULT_CAP = 500
+
+
+def _progress(msg: str) -> None:
+    """Write progress to stderr."""
+    print(msg, file=sys.stderr)
 
 
 def _resolve_knowledge_map(km_path: str = "emoo_knowledge_map.json") -> Optional[dict]:
@@ -225,6 +231,8 @@ def run_skill(client, skill: SkillDef, user_params: dict[str, str],
                 break
 
             all_results.extend(results)
+
+            _progress(f"  已获取 {len(all_results)} 条 (第 {page} 页)")
 
             if len(all_results) >= max_results:
                 all_results = all_results[:max_results]
