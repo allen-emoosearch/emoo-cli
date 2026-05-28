@@ -85,9 +85,12 @@ def _auto_paginate_search(client, body, max_results, ctx):
 
         page += 1
 
+    resp["data"]["_api_total"] = api_total
     resp["data"]["results"] = all_results
     resp["data"]["total"] = len(all_results)
-    resp["data"]["_paginated"] = True
+    if page > 1:
+        resp["data"]["_paginated"] = True
+        resp["data"]["_page_count"] = page
 
     # search 端点有 500 条硬上限，total 永远不超过 500
     truncated = (api_total == API_RESULT_CAP and len(all_results) >= API_RESULT_CAP)
@@ -207,16 +210,20 @@ def get(ctx, page_size, cursor, text_format, filter_conditions, max_results):
 
         all_results = []
         current_cursor = cursor
+        page_count = 0
+        incomplete = False
         while True:
             body["cursor"] = current_cursor
             resp = client.post("/data", body=body)
             data_block = resp.get("data", {})
             results = data_block.get("results", [])
+            page_count += 1
             if not results:
                 break
             all_results.extend(results)
             if len(all_results) >= max_results:
                 all_results = all_results[:max_results]
+                incomplete = data_block.get("has_more", False)
                 break
             if not data_block.get("has_more") or not data_block.get("next_cursor"):
                 break
@@ -224,7 +231,11 @@ def get(ctx, page_size, cursor, text_format, filter_conditions, max_results):
 
         resp["data"]["results"] = all_results
         resp["data"]["total"] = len(all_results)
-        resp["data"]["_paginated"] = True
+        if page_count > 1:
+            resp["data"]["_paginated"] = True
+            resp["data"]["_page_count"] = page_count
+        if incomplete:
+            resp["data"]["_incomplete"] = True
         output(resp, as_json=ctx.obj.get("as_json", False))
         return
 

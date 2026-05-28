@@ -237,9 +237,11 @@ def run_skill(client, skill: SkillDef, user_params: dict[str, str],
 
         outcome["results"] = all_results
         outcome["total"] = len(all_results)
+        outcome["_api_total"] = api_total
 
         if page > 1:
             outcome["_paginated"] = True
+            outcome["_page_count"] = page
 
         if api_total == API_RESULT_CAP and len(all_results) >= API_RESULT_CAP:
             outcome["_truncated"] = True
