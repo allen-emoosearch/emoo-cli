@@ -62,12 +62,15 @@ def record_create(ctx, table_key, table_name, records):
 @base.command()
 @click.option("--table-key", default=None, help="表的系统标识 (与 --table-name 二选一)")
 @click.option("--table-name", default=None, help="表的显示名称 (与 --table-key 二选一)")
-@click.option("--record-key", required=True, help="记录标识")
+@click.option("--record-key", default=None, help="记录标识 (与 --record-title 二选一，优先使用)")
+@click.option("--record-title", default=None, help="记录标题 (依赖 title column)")
 @click.option("--fields", "-f", required=True, help="需要更新的字段 JSON 对象或文件路径")
 @click.pass_context
-def record_update(ctx, table_key, table_name, record_key, fields):
+def record_update(ctx, table_key, table_name, record_key, record_title, fields):
     """更新单条记录。"""
     _ensure_table(table_key, table_name)
+    if not record_key and not record_title:
+        raise click.BadParameter("需要 --record-key 或 --record-title")
     try:
         fields_data = json.loads(fields)
     except json.JSONDecodeError:
@@ -77,11 +80,15 @@ def record_update(ctx, table_key, table_name, record_key, fields):
         except (FileNotFoundError, json.JSONDecodeError) as e:
             raise click.BadParameter(f"无法解析 fields: {fields}")
 
-    body = {"record_key": record_key, "fields": fields_data}
+    body = {"fields": fields_data}
     if table_key:
         body["table_key"] = table_key
     else:
         body["table_name"] = table_name
+    if record_key:
+        body["record_key"] = record_key
+    else:
+        body["record_title"] = record_title
 
     client = EmooClient(base_url=ctx.obj.get("base_url"), user_id=ctx.obj.get("user_id"))
     resp = client.put("/data/records", body=body)
@@ -116,18 +123,29 @@ def record_batch_update(ctx, table_key, table_name, records):
 @base.command()
 @click.option("--table-key", default=None, help="表的系统标识 (与 --table-name 二选一)")
 @click.option("--table-name", default=None, help="表的显示名称 (与 --table-key 二选一)")
-@click.option("--record-keys", "-k", required=True, help="记录标识数组 JSON 或文件路径 (最多100条)")
+@click.option("--record-keys", "-k", default=None, help="记录标识数组 JSON 或文件路径 (与 --record-titles 二选一，优先使用)")
+@click.option("--record-titles", default=None, help="记录标题数组 JSON 或文件路径 (依赖 title column)")
 @click.pass_context
-def record_delete(ctx, table_key, table_name, record_keys):
+def record_delete(ctx, table_key, table_name, record_keys, record_titles):
     """删除记录。"""
     _ensure_table(table_key, table_name)
-    keys_data = _parse_records(record_keys)
-    if not isinstance(keys_data, list):
-        raise click.BadParameter("record_keys 必须是 JSON 字符串数组")
-    if len(keys_data) > 100:
-        raise click.BadParameter(f"单次最多删除 100 条，当前 {len(keys_data)} 条")
+    if record_keys:
+        keys_data = _parse_records(record_keys)
+        if not isinstance(keys_data, list):
+            raise click.BadParameter("record_keys 必须是 JSON 字符串数组")
+        if len(keys_data) > 100:
+            raise click.BadParameter(f"单次最多删除 100 条，当前 {len(keys_data)} 条")
+        body = {"record_keys": keys_data}
+    elif record_titles:
+        titles_data = _parse_records(record_titles)
+        if not isinstance(titles_data, list):
+            raise click.BadParameter("record_titles 必须是 JSON 字符串数组")
+        if len(titles_data) > 100:
+            raise click.BadParameter(f"单次最多删除 100 条，当前 {len(titles_data)} 条")
+        body = {"record_titles": titles_data}
+    else:
+        raise click.BadParameter("需要 --record-keys 或 --record-titles")
 
-    body = {"record_keys": keys_data}
     if table_key:
         body["table_key"] = table_key
     else:

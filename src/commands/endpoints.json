@@ -51,7 +51,7 @@
     "description": "搜索企业绑定的所有数据源（不支持个人数据源）",
     "body": [
       {"name": "keyword", "type": "string", "required": true, "desc": "搜索关键词"},
-      {"name": "page_size", "type": "integer", "required": true, "desc": "每页条数（最大 100）"},
+      {"name": "page_size", "type": "integer", "required": true, "desc": "每页条数（最大 200）"},
       {"name": "current_page", "type": "integer", "required": true, "desc": "页码，从 1 开始"},
       {"name": "text_format", "type": "string", "required": false, "desc": "plain（默认）或 markdown"},
       {"name": "ws_agent_key", "type": "string", "required": false, "desc": "Dify/Coze/Timus 平台的 Agent Key"},
@@ -154,29 +154,28 @@
   },
   "base.record-update": {
     "method": "PUT",
-    "path": "/data/records/{record_key}",
+    "path": "/data/records",
     "auth_required": true,
     "user_id_required": true,
-    "description": "更新单条记录",
+    "description": "更新单条记录（通过 record_key 或 record_title 定位）",
     "body": [
       {"name": "table_name", "type": "string", "required": "条件", "desc": "表显示名称（与 table_key 二选一）"},
       {"name": "table_key", "type": "string", "required": "条件", "desc": "表系统标识（与 table_name 二选一）"},
+      {"name": "record_key", "type": "string", "required": "条件", "desc": "记录标识（与 record_title 二选一，优先使用）"},
+      {"name": "record_title", "type": "string", "required": "条件", "desc": "记录标题（依赖 title column）"},
       {"name": "fields", "type": "object", "required": true, "desc": "需要更新的字段 JSON 对象"}
-    ],
-    "path_params": [
-      {"name": "record_key", "type": "string", "required": true, "desc": "记录标识"}
     ]
   },
   "base.record-batch-update": {
-    "method": "PUT",
-    "path": "/data/records/batch",
+    "method": "POST",
+    "path": "/data/records/batch-update",
     "auth_required": true,
     "user_id_required": true,
     "description": "批量更新记录（最多 100 条）",
     "body": [
       {"name": "table_name", "type": "string", "required": "条件", "desc": "表显示名称（与 table_key 二选一）"},
       {"name": "table_key", "type": "string", "required": "条件", "desc": "表系统标识（与 table_name 二选一）"},
-      {"name": "records", "type": "array", "required": true, "desc": "记录数组，每条含 record_key 和 fields，最多 100 条"}
+      {"name": "records", "type": "array", "required": true, "desc": "记录数组，每条含 record_key/record_title 和 fields，最多 100 条"}
     ]
   },
   "base.record-delete": {
@@ -192,17 +191,17 @@
     ]
   },
   "base.record-list": {
-    "method": "GET",
-    "path": "/data/records",
+    "method": "POST",
+    "path": "/data/records/list",
     "auth_required": true,
     "user_id_required": true,
     "description": "查询记录列表（分页+过滤+排序）",
-    "params": [
+    "body": [
       {"name": "table_name", "type": "string", "required": "条件", "desc": "表显示名称（与 table_key 二选一）"},
       {"name": "table_key", "type": "string", "required": "条件", "desc": "表系统标识（与 table_name 二选一）"},
-      {"name": "page_size", "type": "integer", "required": false, "desc": "每页数量，最大 100"},
+      {"name": "page_size", "type": "integer", "required": false, "desc": "每页数量，最大 100，默认 20"},
       {"name": "current_page", "type": "integer", "required": false, "desc": "页码，从 1 开始"},
-      {"name": "filter", "type": "string", "required": false, "desc": "过滤条件（如 status:eq:active）"},
+      {"name": "filters", "type": "array", "required": false, "desc": "过滤条件数组，格式: 字段:操作符:值"},
       {"name": "sort", "type": "string", "required": false, "desc": "排序（如 created_at:desc）"}
     ]
   },
