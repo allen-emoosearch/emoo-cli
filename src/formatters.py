@@ -34,7 +34,7 @@ def _format_cell(value, col_name: str = "") -> str:
     # Shorten ISO timestamps: 2025-04-23T09:07:53... → 2025-04-23 09:07
     if _ISO_PATTERN.match(s):
         return s[:16].replace('T', ' ')
-    # Truncate long open_id: open_TjTotdpKfgmZ5fSlGyn8phTVFQIF77P3 → open_TjTotdp...
+    # Truncate long open_id: open_AbCdEfGhIjKlMnOpQrStUvWxYz12345 → open_AbCdEf...
     if col_name == 'open_id' and len(s) > 16:
         return s[:12] + '...'
     return s

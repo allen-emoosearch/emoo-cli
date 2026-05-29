@@ -625,10 +625,10 @@ emoo --json app list   # JSON 输出完整 ws_app_key
 
 ```bash
 # 列出文档组
-emoo app doc-groups -k 9ecb14f83abf469db9d2d49d584b5fbc
+emoo app doc-groups -k abc123def4567890abc123def4567890
 
 # 分页 + JSON
-emoo --json app doc-groups -k 9ecb14f83abf469db9d2d49d584b5fbc --page-size 10 --current-page 2
+emoo --json app doc-groups -k abc123def4567890abc123def4567890 --page-size 10 --current-page 2
 ```
 
 返回字段：`app_group_id`、`app_group_name`、`app_group_desc`、`url`、`doc_count`、`created_at`、`updated_at`。
@@ -665,7 +665,7 @@ tags: [营收, POS, 门店]
 emoo:
   search:
     keyword: "{store} {month} 营业情况"  # 搜索关键词模板，{param} 占位
-    app: 天财·POS系统                   # 可选，自动匹配 ws_app_key
+    app: 示例·收银系统                   # 可选，自动匹配 ws_app_key
     doc_group: 营业情况汇总             # 可选，限定文档组
     page_size: 200                      # 可选，默认 200
   params:
@@ -726,7 +726,7 @@ emoo skill show store-revenue --params-only  # 仅参数 JSON
 emoo skill run store-revenue --store "示例门店" --month "2026-03"
 
 # 维度类 skill
-emoo skill run app-filter --keyword "营收" --app_name "天财·POS系统"
+emoo skill run app-filter --keyword "营收" --app_name "示例·收银系统"
 emoo skill run time-filter --keyword "报告" --time "最近7天"
 
 # 导出 CSV
@@ -995,7 +995,7 @@ done | jq -s 'add'
 ```bash
 # Step 1: 拉取 Q2 营收数据 (用 app 过滤 + 时间范围)
 emoo --json data get --max-results 10000 \
-  -f '[[{"field":"ws_app.ws_app_key","operator":"eq","value":"9ecb14f83abf469db9d2d49d584b5fbc"},{"field":"app_created_at","operator":"gte","value":"2026-04-01T00:00:00+08:00"},{"field":"app_created_at","operator":"lte","value":"2026-06-30T23:59:59+08:00"}]]' \
+  -f '[[{"field":"ws_app.ws_app_key","operator":"eq","value":"abc123def4567890abc123def4567890"},{"field":"app_created_at","operator":"gte","value":"2026-04-01T00:00:00+08:00"},{"field":"app_created_at","operator":"lte","value":"2026-06-30T23:59:59+08:00"}]]' \
   > /tmp/q2_revenue.json
 
 # Step 2: jq 聚合 — 按门店求和营业额，排名 Top 10
