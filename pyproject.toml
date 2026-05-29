@@ -22,4 +22,3 @@ include = ["src*"]
 
 [tool.setuptools.package-data]
 "src.commands" = ["*.json"]
-"src.skills.examples" = ["*.md"]
