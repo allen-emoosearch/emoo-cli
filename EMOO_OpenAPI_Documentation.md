@@ -3,7 +3,7 @@
 > **Base URL:** `https://app.emoosearch.com/open-api/v1`
 > **认证方式:** Bearer Token (HTTP `Authorization: Bearer <token>`)
 > **文档来源:** https://open.emoosearch.com
-> **生成日期:** 2026-05-15
+> **生成日期:** 2026-05-29
 
 ---
 
@@ -25,16 +25,23 @@
   - [5.1 主动推送消息给指定用户](#51-主动推送消息给指定用户)
 - [6. EMOO Base](#6-emoo-base)
   - [6.1 新建 Record](#61-新建-record)
-- [7. 数据模型](#7-数据模型)
-  - [7.1 DocDetailInfo](#71-docdetailinfo)
-  - [7.2 DocFilterCondition](#72-docfiltercondition)
-  - [7.3 WsGroupBaseInfo](#73-wsgroupbaseinfo)
-  - [7.4 WsUserDetailInfo](#74-wsuserdetailinfo)
-  - [7.5 WsUserUpdate](#75-wsuserupdate)
-  - [7.6 WsAppInfo](#76-wsappinfo)
-  - [7.7 DocGroupInfo](#77-docgroupinfo)
-- [8. 全局错误码](#8-全局错误码)
-- [9. 通用说明](#9-通用说明)
+  - [6.2 更新 Record](#62-更新-record)
+  - [6.3 批量更新 Record](#63-批量更新-record)
+  - [6.4 删除 Record](#64-删除-record)
+  - [6.5 查询 Record 列表](#65-查询-record-列表)
+- [7. 应用管理](#7-应用管理)
+  - [7.1 获取应用列表](#71-获取应用列表)
+  - [7.2 获取文档组列表](#72-获取文档组列表)
+- [8. 数据模型](#8-数据模型)
+  - [8.1 DocDetailInfo](#81-docdetailinfo)
+  - [8.2 DocFilterCondition](#82-docfiltercondition)
+  - [8.3 WsGroupBaseInfo](#83-wsgroupbaseinfo)
+  - [8.4 WsUserDetailInfo](#84-wsuserdetailinfo)
+  - [8.5 WsUserUpdate](#85-wsuserupdate)
+  - [8.6 WsAppInfo](#86-wsappinfo)
+  - [8.7 DocGroupInfo](#87-docgroupinfo)
+- [9. 全局错误码](#9-全局错误码)
+- [10. 通用说明](#10-通用说明)
 
 ---
 
@@ -118,7 +125,7 @@ curl -X GET "https://app.emoosearch.com/open-api/v1/auth/token?grant_type=client
 | `data.page_size` | integer | 每页数据量（最大 100） |
 | `data.current_page` | integer | 当前页码（从 1 开始） |
 | `data.total_pages` | integer | 总页数 |
-| `data.results` | array | 成员列表，元素类型见 [WsUserDetailInfo](#74-wsuserdetailinfo) |
+| `data.results` | array | 成员列表，元素类型见 [WsUserDetailInfo](#84-wsuserdetailinfo) |
 
 ---
 
@@ -187,7 +194,7 @@ curl -X GET "https://app.emoosearch.com/open-api/v1/auth/token?grant_type=client
 | `keyword` | string | 是 | 搜索关键词 |
 | `ws_agent_key` | string | 否 | Dify/Coze/Timus 等平台需传入，用于按 Agent 数据权限过滤 |
 | `text_format` | string | 否 | `plain`（默认）或 `markdown`，控制 text 类型文档的返回格式 |
-| `filter_conditions` | array | 否 | 过滤条件，外层数组 OR，内层数组 AND，元素见 [DocFilterCondition](#72-docfiltercondition) |
+| `filter_conditions` | array | 否 | 过滤条件，外层数组 OR，内层数组 AND，元素见 [DocFilterCondition](#82-docfiltercondition) |
 
 **请求示例：**
 
@@ -215,7 +222,7 @@ curl -X GET "https://app.emoosearch.com/open-api/v1/auth/token?grant_type=client
 | `data.page_size` | integer | 每页条数（最大 100） |
 | `data.current_page` | integer | 当前页码 |
 | `data.total_pages` | integer | 总页数 |
-| `data.results` | array | 文档列表，元素类型见 [DocDetailInfo](#71-docdetailinfo) |
+| `data.results` | array | 文档列表，元素类型见 [DocDetailInfo](#81-docdetailinfo) |
 
 ---
 
@@ -242,7 +249,7 @@ curl -X GET "https://app.emoosearch.com/open-api/v1/auth/token?grant_type=client
 | `page_size` | integer | 是 | 每页条数（最大 200） |
 | `cursor` | string | 否 | 分页游标，空则从头开始 |
 | `text_format` | string | 否 | `plain`（默认）或 `markdown` |
-| `filter_conditions` | array | 否 | 过滤条件，结构同 [DocFilterCondition](#72-docfiltercondition) |
+| `filter_conditions` | array | 否 | 过滤条件，结构同 [DocFilterCondition](#82-docfiltercondition) |
 
 **请求示例：**
 
@@ -259,7 +266,7 @@ curl -X GET "https://app.emoosearch.com/open-api/v1/auth/token?grant_type=client
 }
 ```
 
-**返回字段：** 结构同 [搜索数据](#31-搜索数据)，`data.results` 元素类型见 [DocDetailInfo](#71-docdetailinfo)。
+**返回字段：** 结构同 [搜索数据](#31-搜索数据)，`data.results` 元素类型见 [DocDetailInfo](#81-docdetailinfo)。
 
 ---
 
@@ -513,9 +520,245 @@ curl -X GET "https://app.emoosearch.com/open-api/v1/auth/token?grant_type=client
 
 ---
 
-## 7. 数据模型
+### 6.2 更新 Record
 
-### 7.1 DocDetailInfo
+> 更新单条数据表记录。
+
+| 项目 | 内容 |
+|------|------|
+| **方法** | `PUT` |
+| **路径** | `/data/records` |
+| **认证** | Bearer Token |
+
+**Header 参数：**
+
+| 参数名 | 类型 | 必填 | 说明 |
+|--------|------|:----:|------|
+| `Emoo-User-Id` | string | 是 | 用户 open_id |
+
+**Body 参数（JSON）：**
+
+| 参数名 | 类型 | 必填 | 说明 |
+|--------|------|:----:|------|
+| `table_key` | string | 条件 | 表的系统标识，与 `table_name` 二选一 |
+| `table_name` | string | 条件 | 表的显示名称，与 `table_key` 二选一 |
+| `record_key` | string | 条件 | 记录标识（与 `record_title` 二选一，优先使用） |
+| `record_title` | string | 条件 | 记录标题（依赖 title column，与 `record_key` 二选一） |
+| `fields` | object | 是 | 需要更新的字段 key-value 对象 |
+
+**请求示例：**
+
+```json
+{
+  "table_name": "线上线索",
+  "record_key": "rec_xxx",
+  "fields": {
+    "姓名": "李四",
+    "联系方式": "13900139000"
+  }
+}
+```
+
+**返回字段：** 同 [6.1 新建 Record](#61-新建-record)。
+
+---
+
+### 6.3 批量更新 Record
+
+> 批量更新多条数据表记录（最多 100 条）。
+
+| 项目 | 内容 |
+|------|------|
+| **方法** | `POST` |
+| **路径** | `/data/records/batch-update` |
+| **认证** | Bearer Token |
+
+**Header 参数：**
+
+| 参数名 | 类型 | 必填 | 说明 |
+|--------|------|:----:|------|
+| `Emoo-User-Id` | string | 是 | 用户 open_id |
+
+**Body 参数（JSON）：**
+
+| 参数名 | 类型 | 必填 | 说明 |
+|--------|------|:----:|------|
+| `table_key` | string | 条件 | 表的系统标识，与 `table_name` 二选一 |
+| `table_name` | string | 条件 | 表的显示名称，与 `table_key` 二选一 |
+| `records` | array | 是 | 记录数组，每条含 `record_key`/`record_title` 和 `fields`，最多 100 条 |
+
+**请求示例：**
+
+```json
+{
+  "table_name": "线上线索",
+  "records": [
+    { "record_key": "rec_xxx", "fields": { "姓名": "李四" } },
+    { "record_key": "rec_yyy", "fields": { "姓名": "王五" } }
+  ]
+}
+```
+
+**返回字段：** 同 [6.1 新建 Record](#61-新建-record)。
+
+---
+
+### 6.4 删除 Record
+
+> 删除数据表记录（最多 100 条）。
+
+| 项目 | 内容 |
+|------|------|
+| **方法** | `DELETE` |
+| **路径** | `/data/records` |
+| **认证** | Bearer Token |
+
+**Header 参数：**
+
+| 参数名 | 类型 | 必填 | 说明 |
+|--------|------|:----:|------|
+| `Emoo-User-Id` | string | 是 | 用户 open_id |
+
+**Body 参数（JSON）：**
+
+| 参数名 | 类型 | 必填 | 说明 |
+|--------|------|:----:|------|
+| `table_key` | string | 条件 | 表的系统标识，与 `table_name` 二选一 |
+| `table_name` | string | 条件 | 表的显示名称，与 `table_key` 二选一 |
+| `record_keys` | array | 是 | 记录标识数组，最多 100 条 |
+
+**请求示例：**
+
+```json
+{
+  "table_name": "线上线索",
+  "record_keys": ["rec_xxx", "rec_yyy"]
+}
+```
+
+**返回字段：** 同 [6.1 新建 Record](#61-新建-record)。
+
+---
+
+### 6.5 查询 Record 列表
+
+> 查询数据表记录列表，支持分页、过滤和排序。
+
+| 项目 | 内容 |
+|------|------|
+| **方法** | `POST` |
+| **路径** | `/data/records/list` |
+| **认证** | Bearer Token |
+
+**Header 参数：**
+
+| 参数名 | 类型 | 必填 | 说明 |
+|--------|------|:----:|------|
+| `Emoo-User-Id` | string | 是 | 用户 open_id |
+
+**Body 参数（JSON）：**
+
+| 参数名 | 类型 | 必填 | 说明 |
+|--------|------|:----:|------|
+| `table_key` | string | 条件 | 表的系统标识，与 `table_name` 二选一 |
+| `table_name` | string | 条件 | 表的显示名称，与 `table_key` 二选一 |
+| `page_size` | integer | 否 | 每页数量，最大 100，默认 20 |
+| `current_page` | integer | 否 | 页码，从 1 开始，默认 1 |
+| `filters` | array | 否 | 过滤条件数组，格式: `字段:操作符:值`（如 `["status:eq:active"]`） |
+| `sort` | string | 否 | 排序（如 `created_at:desc`） |
+
+**请求示例：**
+
+```json
+{
+  "table_name": "线上线索",
+  "page_size": 20,
+  "current_page": 1,
+  "filters": ["status:eq:active"],
+  "sort": "created_at:desc"
+}
+```
+
+**返回字段：**
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `code` | integer | 状态码 |
+| `message` | string | 状态信息 |
+| `data.total` | integer | 总记录数 |
+| `data.results` | array | 记录列表 |
+
+---
+
+## 7. 应用管理
+
+### 7.1 获取应用列表
+
+> 获取工作区所有应用及其文档组/文档数量概览。
+
+| 项目 | 内容 |
+|------|------|
+| **方法** | `GET` |
+| **路径** | `/apps` |
+| **认证** | Bearer Token |
+
+**返回字段：**
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `code` | integer | 状态码 |
+| `message` | string | 状态信息 |
+| `data[].id` | integer | 应用记录 ID |
+| `data[].ws_app_key` | string | 应用的 Ws App Key |
+| `data[].title` | string | 应用名称 |
+| `data[].doc_group_count` | integer | 文档组数量 |
+| `data[].doc_count` | integer | 文档总数量 |
+
+---
+
+### 7.2 获取文档组列表
+
+> 获取指定应用下的所有文档组（分页）。
+
+| 项目 | 内容 |
+|------|------|
+| **方法** | `GET` |
+| **路径** | `/app/{ws_app_key}/doc-groups` |
+| **认证** | Bearer Token |
+
+**Path 参数：**
+
+| 参数名 | 类型 | 必填 | 说明 |
+|--------|------|:----:|------|
+| `ws_app_key` | string | 是 | 应用的 Ws App Key |
+
+**Query 参数：**
+
+| 参数名 | 类型 | 必填 | 说明 |
+|--------|------|:----:|------|
+| `page_size` | integer | 否 | 每页数量，最大 200，默认 100 |
+| `current_page` | integer | 否 | 页码，从 1 开始，默认 1 |
+
+**返回字段：**
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `code` | integer | 状态码 |
+| `message` | string | 状态信息 |
+| `data.total` | integer | 总数据量 |
+| `data.results[].app_group_id` | string | 文档组在源应用中的 ID |
+| `data.results[].app_group_name` | string | 文档组名称 |
+| `data.results[].app_group_desc` | string | 文档组描述 |
+| `data.results[].url` | string | 访问链接 |
+| `data.results[].doc_count` | integer | 文档数量 |
+| `data.results[].created_at` | string | 创建时间 |
+| `data.results[].updated_at` | string | 更新时间 |
+
+---
+
+## 8. 数据模型
+
+### 8.1 DocDetailInfo
 
 文档详情信息。
 
@@ -529,12 +772,12 @@ curl -X GET "https://app.emoosearch.com/open-api/v1/auth/token?grant_type=client
 | `content` | string | 否 | 文档内容。text 类型根据 `text_format` 返回纯文本或 markdown；json 类型返回嵌套 JSON 字符串 |
 | `app_created_at` | string | 是 | 文档在源应用中的创建时间 |
 | `app_updated_at` | string | 是 | 文档在源应用中的最近更新时间 |
-| `ws_app` | object | 否 | 文档所属应用信息，见 [WsAppInfo](#76-wsappinfo) |
-| `doc_group` | object | 否 | 文档所属文档组信息，见 [DocGroupInfo](#77-docgroupinfo) |
+| `ws_app` | object | 否 | 文档所属应用信息，见 [WsAppInfo](#86-wsappinfo) |
+| `doc_group` | object | 否 | 文档所属文档组信息，见 [DocGroupInfo](#87-docgroupinfo) |
 
 ---
 
-### 7.2 DocFilterCondition
+### 8.2 DocFilterCondition
 
 文档过滤条件，用于 `/search` 和 `/data` 接口。
 
@@ -569,7 +812,7 @@ curl -X GET "https://app.emoosearch.com/open-api/v1/auth/token?grant_type=client
 
 ---
 
-### 7.3 WsGroupBaseInfo
+### 8.3 WsGroupBaseInfo
 
 工作区角色/群组基础信息。
 
@@ -585,7 +828,7 @@ curl -X GET "https://app.emoosearch.com/open-api/v1/auth/token?grant_type=client
 
 ---
 
-### 7.4 WsUserDetailInfo
+### 8.4 WsUserDetailInfo
 
 工作区成员详细信息。
 
@@ -598,7 +841,7 @@ curl -X GET "https://app.emoosearch.com/open-api/v1/auth/token?grant_type=client
 | `ws_username` | string | 是 | 工作区中的用户名 |
 | `created_at` | string | 是 | 创建时间 |
 | `updated_at` | string | 是 | 更新时间 |
-| `ws_group_list` | array | 否 | 所属角色列表，元素为 [WsGroupBaseInfo](#73-wsgroupbaseinfo) |
+| `ws_group_list` | array | 否 | 所属角色列表，元素为 [WsGroupBaseInfo](#83-wsgroupbaseinfo) |
 | `email` | string | 否 | 邮箱 |
 | `mobile_num` | string | 否 | 手机号 |
 | `ext_info` | object | 否 | 扩展信息（含 `key` 字段） |
@@ -613,7 +856,7 @@ curl -X GET "https://app.emoosearch.com/open-api/v1/auth/token?grant_type=client
 
 ---
 
-### 7.5 WsUserUpdate
+### 8.5 WsUserUpdate
 
 更新成员信息的请求体元素。
 
@@ -625,7 +868,7 @@ curl -X GET "https://app.emoosearch.com/open-api/v1/auth/token?grant_type=client
 
 ---
 
-### 7.6 WsAppInfo
+### 8.6 WsAppInfo
 
 应用信息。
 
@@ -639,7 +882,7 @@ curl -X GET "https://app.emoosearch.com/open-api/v1/auth/token?grant_type=client
 
 ---
 
-### 7.7 DocGroupInfo
+### 8.7 DocGroupInfo
 
 文档组信息。
 
@@ -653,7 +896,7 @@ curl -X GET "https://app.emoosearch.com/open-api/v1/auth/token?grant_type=client
 
 ---
 
-## 8. 全局错误码
+## 9. 全局错误码
 
 所有接口在 `code` 字段中可能返回以下值：
 
@@ -669,20 +912,20 @@ curl -X GET "https://app.emoosearch.com/open-api/v1/auth/token?grant_type=client
 
 ---
 
-## 9. 通用说明
+## 10. 通用说明
 
-### 9.1 认证流程
+### 10.1 认证流程
 
 1. 调用 `GET /auth/token` 获取 `access_token`，有效期 2 小时
 2. 所有后续请求在 Header 中携带 `Authorization: Bearer <access_token>`
 3. 涉及用户身份的接口需额外在 Header 中传入 `Emoo-User-Id`
 
-### 9.2 分页方式
+### 10.2 分页方式
 
 - **页码分页：** `/search`、`/ws-user`、`/chat`(GET) 使用 `current_page` + `page_size`
 - **游标分页：** `/data` 使用 `cursor` + `page_size`
 
-### 9.3 过滤条件语法
+### 10.3 过滤条件语法
 
 `filter_conditions` 是一个二维数组：
 - **外层数组：** OR 逻辑（满足任意一组条件即返回）
@@ -699,7 +942,7 @@ curl -X GET "https://app.emoosearch.com/open-api/v1/auth/token?grant_type=client
 ]
 ```
 
-### 9.4 数据安全
+### 10.4 数据安全
 
 - 仅支持搜索企业绑定的数据源，不支持搜索个人绑定的数据源
 - 同一用户在不同租户（企业）中的 `open_id` 不同
@@ -720,3 +963,9 @@ curl -X GET "https://app.emoosearch.com/open-api/v1/auth/token?grant_type=client
 | 对话 | POST | `/chat/messages` | 发送对话消息 | Released |
 | 消息 | POST | `/message` | 主动推送消息给指定用户 | Released |
 | EMOO Base | POST | `/data/records` | 新建 Record | Developing |
+| EMOO Base | PUT | `/data/records` | 更新 Record | Developing |
+| EMOO Base | POST | `/data/records/batch-update` | 批量更新 Record | Developing |
+| EMOO Base | DELETE | `/data/records` | 删除 Record | Developing |
+| EMOO Base | POST | `/data/records/list` | 查询 Record 列表 | Developing |
+| 应用管理 | GET | `/apps` | 获取应用列表 | Released |
+| 应用管理 | GET | `/app/{ws_app_key}/doc-groups` | 获取文档组列表 | Released |
