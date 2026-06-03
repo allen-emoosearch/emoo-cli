@@ -220,17 +220,17 @@ src/
   errors.py                 # EmooError hierarchy (Auth, Permission, NotFound, Validation, Server)
   formatters.py             # Rich table / JSON output helpers
   commands/
-    auth.py                 # auth login / status / set-default-user-id
+    auth.py                 # auth login / status / set-default-user-id / set-base-url
     api.py                  # L3 passthrough (GET/POST/PUT/DELETE)
     schema_cmd.py           # schema list / <endpoint> introspection
-    endpoints.json          # 12 endpoint schemas (method, path, params, body, response)
+    endpoints.json          # 24 endpoint schemas (method, path, params, body, response)
     data.py                 # data search / get
     chat.py                 # chat list / create / send (with --dry-run)
     message.py              # message push (with --dry-run)
     contact.py              # contact list / update
     app.py                  # app overview / list / doc-groups
     skill.py                # skill init/list/show/run/create/register + pipeline sub-group
-    base_cmd.py             # base record-create/update/batch-update/delete/list
+    base.py                 # base record/table/column CRUD (13 commands)
   skills/
     loader.py               # MD skill parser (YAML frontmatter)
     runner.py               # Skill executor (template → app resolve → search → CSV)
