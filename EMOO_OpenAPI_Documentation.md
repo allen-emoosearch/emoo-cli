@@ -1232,6 +1232,26 @@ curl -X GET "https://app.emoosearch.com/open-api/v1/auth/token?grant_type=client
 - 仅支持搜索企业绑定的数据源，不支持搜索个人绑定的数据源
 - 同一用户在不同租户（企业）中的 `open_id` 不同
 
+### 10.5 EMOO Base 字段类型与写入格式
+
+通过 `record-create` / `record-update` 写入时，各字段类型需使用以下格式：
+
+| 类型 | 写入格式 | 示例 | 返回格式 | 备注 |
+|------|----------|------|----------|------|
+| `string` | 字符串 | `"hello"` | `"hello"` | |
+| `number` | 数字 | `123.45` | `123.45` | |
+| `boolean` | 布尔 | `true` / `false` | `1` / `0` | 返回为整数 |
+| `date` | 字符串 | `"2026-06-15"` | `"2026-06-15"` | YYYY-MM-DD |
+| `time` | 字符串 | `"14:30:00"` | `"14:30:00"` | HH:MM:SS |
+| `datetime` | 字符串 | `"2026-06-15 14:30:00"` | `"2026-06-15 14:30:00"` | |
+| `select` | **简单值**（非数组） | `"a"` (option value) | `["选项A"]` (label 数组) | ⚠️ 不能用 `["a"]`，会报"选项值无效" |
+| `reference` | **数组** | `["record_key"]` | `["record_key"]` | ⚠️ 必须用数组 |
+| `user` | **数字** (user_id) | `123` | `[123]` | ⚠️ open_id 格式不支持，需用数字 ID |
+| `group` | **数字** (group_id) | `1` | `[1]` | ⚠️ 需用数字 ID |
+| `file` | 字符串 URL | `"https://..."` | `["https://..."]` | |
+
+> **关键规则**: select 用裸值，reference 用数组，user/group 用数字 ID。select 与 reference 的格式不对称是最容易踩的坑。
+
 ---
 
 ## API 接口总览

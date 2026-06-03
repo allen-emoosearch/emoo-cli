@@ -68,6 +68,22 @@ emoo base table-get [--table-key <key>]
 emoo base column-add [--table-key <key>] -n <name> -t <type> [--options]
 emoo base column-update [--table-key <key>] [--column-key <key>]
 emoo base column-delete [--table-key <key>] [--column-key <key>]
+
+## Base 字段类型写入格式
+
+| 类型 | 写入 | 示例 |
+|------|------|------|
+| string | 字符串 | "hello" |
+| number | 数字 | 123.45 |
+| boolean | 布尔 | true/false (返回 1/0) |
+| date | 字符串 | "2026-06-15" |
+| time | 字符串 | "14:30:00" |
+| datetime | 字符串 | "2026-06-15 14:30:00" |
+| select | **简单值** | "a" (⚠️ 不能 ["a"]) |
+| reference | **数组** | ["record_key"] (⚠️ 必须数组) |
+| user | **数字ID** | 123 (⚠️ 不能 open_id) |
+| group | **数字ID** | 1 |
+| file | URL字符串 | "https://..." |
 ```
 
 ## Global flags
