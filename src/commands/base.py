@@ -31,7 +31,7 @@ def _ensure_table(table_key, table_name):
 
 @click.group()
 def base():
-    """EMOO Base 数据表操作 (增删改查记录)."""
+    """EMOO Base 数据表操作 (表/列/记录增删改查)."""
 
 
 @base.command()
@@ -288,17 +288,29 @@ def table_delete(ctx, table_key, table_name):
 @click.option("--table-name", default=None, help="表名称 (与 --table-key 二选一)")
 @click.pass_context
 def table_get(ctx, table_key, table_name):
-    """获取表详情（含完整列信息）。"""
+    """获取表详情（当前通过列表 + 客户端过滤，后续 API 支持直查后切换）。"""
     _ensure_table(table_key, table_name)
 
-    params = {}
-    if table_key:
-        params["table_key"] = table_key
-    else:
-        params["table_name"] = table_name
-
     client = EmooClient(base_url=ctx.obj.get("base_url"), user_id=ctx.obj.get("user_id"))
-    resp = client.get("/data/table", params=params)
+    # 当前 API 的 GET /data/table 不支持 query 过滤，拉全量后客户端匹配
+    resp = client.get("/data/table", params={"page_size": 100})
+    results = resp.get("data", {}).get("results", [])
+
+    match = None
+    for t in results:
+        if table_key and t.get("table_key") == table_key:
+            match = t
+            break
+        if table_name and t.get("table_name") == table_name:
+            match = t
+            break
+
+    if not match:
+        identifier = table_key or table_name
+        click.echo(f"未找到表: {identifier}", err=True)
+        ctx.exit(1)
+
+    resp["data"] = match
     output(resp, as_json=ctx.obj.get("as_json", False))
 
 

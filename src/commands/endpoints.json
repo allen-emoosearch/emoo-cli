@@ -291,7 +291,7 @@
     "path": "/data/table",
     "auth_required": true,
     "user_id_required": true,
-    "description": "获取表详情（含完整列信息），通过 table_key 或 table_name 定位",
+    "description": "获取表详情（当前通过列表+客户端过滤，后续 API 支持直查后切换），通过 table_key 或 table_name 定位",
     "params": [
       {"name": "table_key", "type": "string", "required": "条件", "desc": "表标识（与 table_name 二选一）"},
       {"name": "table_name", "type": "string", "required": "条件", "desc": "表名称（与 table_key 二选一）"}
