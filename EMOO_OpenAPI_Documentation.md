@@ -700,7 +700,7 @@ curl -X GET "https://app.emoosearch.com/open-api/v1/auth/token?grant_type=client
 
 ### 6.6 创建表
 
-> **状态：Developing（未部署）** — 创建数据表，可同时指定初始列定义。
+> **状态：Developing** — 创建数据表，可同时指定初始列定义。
 
 | 项目 | 内容 |
 |------|------|
@@ -753,7 +753,7 @@ curl -X GET "https://app.emoosearch.com/open-api/v1/auth/token?grant_type=client
 
 ### 6.7 获取表列表
 
-> **状态：Developing（未部署）** — 分页获取数据表列表。
+> **状态：Developing** — 分页获取数据表列表。
 
 | 项目 | 内容 |
 |------|------|
@@ -774,7 +774,7 @@ curl -X GET "https://app.emoosearch.com/open-api/v1/auth/token?grant_type=client
 
 ### 6.8 更新表
 
-> **状态：Developing（未部署）** — 更新表名称或扩展元数据。
+> **状态：Developing** — 更新表名称或扩展元数据。
 
 | 项目 | 内容 |
 |------|------|
@@ -804,7 +804,7 @@ curl -X GET "https://app.emoosearch.com/open-api/v1/auth/token?grant_type=client
 
 ### 6.9 删除表
 
-> **状态：Developing（未部署）** — 软删除数据表。
+> **状态：Developing** — 软删除数据表。
 
 | 项目 | 内容 |
 |------|------|
@@ -823,7 +823,7 @@ curl -X GET "https://app.emoosearch.com/open-api/v1/auth/token?grant_type=client
 
 ### 6.10 获取表详情
 
-> **状态：Developing（未部署）** — 获取表详情（含完整列信息）。
+> **状态：Developing** — 获取表详情（含完整列信息）。
 
 | 项目 | 内容 |
 |------|------|
@@ -839,7 +839,7 @@ curl -X GET "https://app.emoosearch.com/open-api/v1/auth/token?grant_type=client
 
 ### 6.11 添加列
 
-> **状态：Developing（未部署）** — 向数据表添加一列。
+> **状态：Developing** — 向数据表添加一列。
 
 | 项目 | 内容 |
 |------|------|
@@ -867,7 +867,7 @@ curl -X GET "https://app.emoosearch.com/open-api/v1/auth/token?grant_type=client
 
 ### 6.12 更新列
 
-> **状态：Developing（未部署）** — 更新列属性。
+> **状态：Developing** — 更新列属性。
 
 | 项目 | 内容 |
 |------|------|
@@ -881,7 +881,7 @@ curl -X GET "https://app.emoosearch.com/open-api/v1/auth/token?grant_type=client
 
 ### 6.13 删除列
 
-> **状态：Developing（未部署）** — 软删除列。
+> **状态：Developing** — 软删除列。
 
 | 项目 | 内容 |
 |------|------|
@@ -1252,13 +1252,13 @@ curl -X GET "https://app.emoosearch.com/open-api/v1/auth/token?grant_type=client
 | EMOO Base | POST | `/data/records/batch-update` | 批量更新 Record | Developing |
 | EMOO Base | DELETE | `/data/records` | 删除 Record | Developing |
 | EMOO Base | POST | `/data/records/list` | 查询 Record 列表 | Developing |
-| EMOO Base | POST | `/data/table` | 创建表 | Developing（未部署） |
-| EMOO Base | GET | `/data/table` | 获取表列表 | Developing（未部署） |
-| EMOO Base | PUT | `/data/table` | 更新表 | Developing（未部署） |
-| EMOO Base | DELETE | `/data/table` | 删除表 | Developing（未部署） |
-| EMOO Base | GET | `/data/table` | 获取表详情 | Developing（未部署） |
-| EMOO Base | POST | `/data/table/columns` | 添加列 | Developing（未部署） |
-| EMOO Base | PUT | `/data/table/columns` | 更新列 | Developing（未部署） |
-| EMOO Base | DELETE | `/data/table/columns` | 删除列 | Developing（未部署） |
+| EMOO Base | POST | `/data/table` | 创建表 | Developing |
+| EMOO Base | GET | `/data/table` | 获取表列表 | Developing |
+| EMOO Base | PUT | `/data/table` | 更新表 | Developing |
+| EMOO Base | DELETE | `/data/table` | 删除表 | Developing |
+| EMOO Base | GET | `/data/table` | 获取表详情 | Developing |
+| EMOO Base | POST | `/data/table/columns` | 添加列 | Developing |
+| EMOO Base | PUT | `/data/table/columns` | 更新列 | Developing |
+| EMOO Base | DELETE | `/data/table/columns` | 删除列 | Developing |
 | 应用管理 | GET | `/apps` | 获取应用列表 | Released |
 | 应用管理 | GET | `/app/{ws_app_key}/doc-groups` | 获取文档组列表 | Released |
