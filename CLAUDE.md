@@ -60,6 +60,14 @@ emoo base record-update --table-name <name> --record-key <key> -f '<json>'
 emoo base record-batch-update --table-name <name> -r '<json-array>'
 emoo base record-delete --table-name <name> -k '<json-array>'
 emoo base record-list --table-name <name> [-f <filter>] [--sort <sort>] [--page-size 20]
+emoo base table-create -n <name> [--columns '<json>'] [--extra '<json>']   # 创建表 (未部署)
+emoo base table-list [--page-size 20]                                       # 获取表列表 (未部署)
+emoo base table-update [--table-key <key>] [--new-table-name <name>]        # 更新表 (未部署)
+emoo base table-delete [--table-key <key>]                                   # 删除表 (未部署)
+emoo base table-get [--table-key <key>]                                      # 获取表详情 (未部署)
+emoo base column-add [--table-key <key>] -n <name> -t <type> [--options]   # 添加列 (未部署)
+emoo base column-update [--table-key <key>] [--column-key <key>]             # 更新列 (未部署)
+emoo base column-delete [--table-key <key>] [--column-key <key>]             # 删除列 (未部署)
 ```
 
 ## Global flags

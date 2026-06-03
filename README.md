@@ -1178,6 +1178,14 @@ emoo base record-update                    更新单条记录
 emoo base record-batch-update              批量更新记录
 emoo base record-delete                    删除记录
 emoo base record-list                      查询记录列表
+emoo base table-create -n <name>           创建数据表 (未部署)
+emoo base table-list                       获取表列表 (未部署)
+emoo base table-update                     更新数据表 (未部署)
+emoo base table-delete                     删除数据表 (未部署)
+emoo base table-get                        获取表详情 (未部署)
+emoo base column-add -n <name> -t <type>   添加列 (未部署)
+emoo base column-update                    更新列 (未部署)
+emoo base column-delete                    删除列 (未部署)
 ```
 
 ---

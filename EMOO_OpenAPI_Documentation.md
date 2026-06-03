@@ -29,6 +29,14 @@
   - [6.3 批量更新 Record](#63-批量更新-record)
   - [6.4 删除 Record](#64-删除-record)
   - [6.5 查询 Record 列表](#65-查询-record-列表)
+  - [6.6 创建表](#66-创建表)
+  - [6.7 获取表列表](#67-获取表列表)
+  - [6.8 更新表](#68-更新表)
+  - [6.9 删除表](#69-删除表)
+  - [6.10 获取表详情](#610-获取表详情)
+  - [6.11 添加列](#611-添加列)
+  - [6.12 更新列](#612-更新列)
+  - [6.13 删除列](#613-删除列)
 - [7. 应用管理](#7-应用管理)
   - [7.1 获取应用列表](#71-获取应用列表)
   - [7.2 获取文档组列表](#72-获取文档组列表)
@@ -690,6 +698,201 @@ curl -X GET "https://app.emoosearch.com/open-api/v1/auth/token?grant_type=client
 
 ---
 
+### 6.6 创建表
+
+> **状态：Developing（未部署）** — 创建数据表，可同时指定初始列定义。
+
+| 项目 | 内容 |
+|------|------|
+| **方法** | `POST` |
+| **路径** | `/data/table` |
+| **认证** | Bearer Token |
+
+**Header 参数：**
+
+| 参数名 | 类型 | 必填 | 说明 |
+|--------|------|:----:|------|
+| `Emoo-User-Id` | string | 是 | 用户 open_id |
+
+**Body 参数（JSON）：**
+
+| 参数名 | 类型 | 必填 | 说明 |
+|--------|------|:----:|------|
+| `table_name` | string | 是 | 表名称 |
+| `extra` | object | 否 | 扩展元数据 |
+| `columns` | array[ColumnDef] | 否 | 初始列定义数组 |
+
+**ColumnDef 字段：**
+
+| 参数名 | 类型 | 必填 | 说明 |
+|--------|------|:----:|------|
+| `column_name` | string | 是 | 列名称 |
+| `type` | enum | 是 | 列类型：`string`/`number`/`boolean`/`date`/`time`/`datetime`/`reference`/`file`/`user`/`group`/`select` |
+| `title_column` | boolean | 否 | 是否为标题列，默认 false |
+| `multiple` | boolean | 否 | 是否多选，默认 false |
+| `reference_table_key` | string | 否 | 关联表 key（reference 类型） |
+| `options` | object | 否 | 列选项（select 类型） |
+| `extra` | object | 否 | 扩展元数据 |
+
+**请求示例：**
+
+```json
+{
+  "table_name": "员工管理",
+  "columns": [
+    {"column_name": "姓名", "type": "string", "title_column": true},
+    {"column_name": "年龄", "type": "number"},
+    {"column_name": "部门", "type": "select", "options": {"options": [{"label": "技术部", "value": "1"}]}}
+  ]
+}
+```
+
+**返回字段：** `data` 为 TableWithColumns — `table_key`、`table_name`、`extra`、`column_count`、`record_count`、`created_at`、`updated_at`、`columns[]`
+
+---
+
+### 6.7 获取表列表
+
+> **状态：Developing（未部署）** — 分页获取数据表列表。
+
+| 项目 | 内容 |
+|------|------|
+| **方法** | `GET` |
+| **路径** | `/data/table` |
+| **认证** | Bearer Token |
+
+**Query 参数：**
+
+| 参数名 | 类型 | 必填 | 说明 |
+|--------|------|:----:|------|
+| `page_size` | integer | 否 | 每页数量，默认 20，最大 100 |
+| `current_page` | integer | 否 | 页码，默认 1 |
+
+**返回字段：** 分页结构 + `data.results[]` 为 TableBrief — `table_key`、`table_name`、`extra`、`column_count`、`record_count`、`created_at`、`updated_at`
+
+---
+
+### 6.8 更新表
+
+> **状态：Developing（未部署）** — 更新表名称或扩展元数据。
+
+| 项目 | 内容 |
+|------|------|
+| **方法** | `PUT` |
+| **路径** | `/data/table` |
+| **认证** | Bearer Token |
+
+**Body 参数（JSON）：**
+
+| 参数名 | 类型 | 必填 | 说明 |
+|--------|------|:----:|------|
+| `table_key` | string | 条件 | 表标识（与 `table_name` 二选一） |
+| `table_name` | string | 条件 | 表名称（与 `table_key` 二选一） |
+| `new_table_name` | string | 条件 | 新表名（与 `extra` 二选一） |
+| `extra` | object | 条件 | 扩展元数据（与 `new_table_name` 二选一） |
+
+**请求示例：**
+
+```json
+{
+  "table_key": "tb_xxx",
+  "new_table_name": "员工花名册"
+}
+```
+
+---
+
+### 6.9 删除表
+
+> **状态：Developing（未部署）** — 软删除数据表。
+
+| 项目 | 内容 |
+|------|------|
+| **方法** | `DELETE` |
+| **路径** | `/data/table` |
+| **认证** | Bearer Token |
+
+**Body 参数（JSON）：**
+
+| 参数名 | 类型 | 必填 | 说明 |
+|--------|------|:----:|------|
+| `table_key` | string | 条件 | 表标识（与 `table_name` 二选一） |
+| `table_name` | string | 条件 | 表名称（与 `table_key` 二选一） |
+
+---
+
+### 6.10 获取表详情
+
+> **状态：Developing（未部署）** — 获取表详情（含完整列信息）。
+
+| 项目 | 内容 |
+|------|------|
+| **方法** | `GET` |
+| **路径** | `/data/table` |
+| **认证** | Bearer Token |
+
+**Query 参数：** 与 [6.9 删除表](#69-删除表) 相同（`table_key`/`table_name` 二选一）
+
+**返回字段：** `data` 为 TableWithColumns
+
+---
+
+### 6.11 添加列
+
+> **状态：Developing（未部署）** — 向数据表添加一列。
+
+| 项目 | 内容 |
+|------|------|
+| **方法** | `POST` |
+| **路径** | `/data/table/columns` |
+| **认证** | Bearer Token |
+
+**Body 参数（JSON）：**
+
+| 参数名 | 类型 | 必填 | 说明 |
+|--------|------|:----:|------|
+| `table_key` | string | 条件 | 表标识（与 `table_name` 二选一） |
+| `table_name` | string | 条件 | 表名称（与 `table_key` 二选一） |
+| `column_name` | string | 是 | 列名称 |
+| `type` | enum | 是 | 列类型（同创建表） |
+| `title_column` | boolean | 否 | 是否为标题列 |
+| `multiple` | boolean | 否 | 是否多选 |
+| `reference_table_key` | string | 否 | 关联表 key |
+| `options` | object | 否 | 列选项 |
+| `extra` | object | 否 | 扩展元数据 |
+
+**返回字段：** `data` 为 ColumnInfo — `column_key`、`column_name`、`type`、`table_key`、`title_column`、`multiple`、`order`、`reference_table_key`、`options`、`extra`
+
+---
+
+### 6.12 更新列
+
+> **状态：Developing（未部署）** — 更新列属性。
+
+| 项目 | 内容 |
+|------|------|
+| **方法** | `PUT` |
+| **路径** | `/data/table/columns` |
+| **认证** | Bearer Token |
+
+**Body 参数（JSON）：** `table_key`/`table_name`（二选一）+ `column_key`/`column_name`（二选一）+ 可选的 `new_column_name`/`extra`
+
+---
+
+### 6.13 删除列
+
+> **状态：Developing（未部署）** — 软删除列。
+
+| 项目 | 内容 |
+|------|------|
+| **方法** | `DELETE` |
+| **路径** | `/data/table/columns` |
+| **认证** | Bearer Token |
+
+**Body 参数（JSON）：** `table_key`/`table_name`（二选一）+ `column_key`/`column_name`（二选一）
+
+---
+
 ## 7. 应用管理
 
 ### 7.1 获取应用列表
@@ -896,6 +1099,88 @@ curl -X GET "https://app.emoosearch.com/open-api/v1/auth/token?grant_type=client
 
 ---
 
+### 8.8 TableIdentifier
+
+表标识 — 用于在所有 EMOO Base 接口中定位目标表。
+
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|:----:|------|
+| `table_key` | string | 条件 | 表系统标识（与 `table_name` 二选一） |
+| `table_name` | string | 条件 | 表显示名称（与 `table_key` 二选一） |
+
+---
+
+### 8.9 TableBrief
+
+表简要信息（列表返回）。
+
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|:----:|------|
+| `table_key` | string | 是 | 表系统标识 |
+| `table_name` | string | 是 | 表名称 |
+| `extra` | object | 否 | 扩展元数据 |
+| `column_count` | integer | 是 | 列数量 |
+| `record_count` | integer | 是 | 记录总数 |
+| `created_at` | string | 是 | 创建时间 |
+| `updated_at` | string | 是 | 更新时间 |
+
+---
+
+### 8.10 ColumnDef
+
+列定义 — 创建表或添加列时使用。
+
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|:----:|------|
+| `column_name` | string | 是 | 列名称 |
+| `type` | enum | 是 | 列类型：`string`/`number`/`boolean`/`date`/`time`/`datetime`/`reference`/`file`/`user`/`group`/`select` |
+| `title_column` | boolean | 否 | 是否为标题列，默认 false |
+| `multiple` | boolean | 否 | 是否多选，默认 false |
+| `reference_table_key` | string | 否 | 关联表 key |
+| `options` | object | 否 | 列选项 |
+| `extra` | object | 否 | 扩展元数据 |
+
+---
+
+### 8.11 ColumnInfo
+
+列详情信息（响应返回）。
+
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|:----:|------|
+| `column_key` | string | 是 | 列系统标识 |
+| `column_name` | string | 是 | 列名称 |
+| `type` | string | 是 | 列类型 |
+| `table_key` | string | 是 | 所属表 key |
+| `title_column` | boolean | 是 | 是否为标题列 |
+| `multiple` | boolean | 是 | 是否多选 |
+| `order` | integer | 否 | 排序序号 |
+| `reference_table_key` | string | 否 | 关联表 key |
+| `reference_table_name` | string | 否 | 关联表名称 |
+| `options` | object | 否 | 列选项 |
+| `extra` | object | 否 | 扩展元数据 |
+| `created_at` | string | 是 | 创建时间 |
+| `updated_at` | string | 是 | 更新时间 |
+
+---
+
+### 8.12 TableWithColumns
+
+表详情（含完整列信息）。
+
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|:----:|------|
+| `table_key` | string | 是 | 表系统标识 |
+| `table_name` | string | 是 | 表名称 |
+| `extra` | object | 否 | 扩展元数据 |
+| `column_count` | integer | 是 | 列数量 |
+| `record_count` | integer | 是 | 记录总数 |
+| `created_at` | string | 是 | 创建时间 |
+| `updated_at` | string | 是 | 更新时间 |
+| `columns` | array[ColumnInfo] | 否 | 列定义数组，元素见 [ColumnInfo](#811-columninfo) |
+
+---
+
 ## 9. 全局错误码
 
 所有接口在 `code` 字段中可能返回以下值：
@@ -967,5 +1252,13 @@ curl -X GET "https://app.emoosearch.com/open-api/v1/auth/token?grant_type=client
 | EMOO Base | POST | `/data/records/batch-update` | 批量更新 Record | Developing |
 | EMOO Base | DELETE | `/data/records` | 删除 Record | Developing |
 | EMOO Base | POST | `/data/records/list` | 查询 Record 列表 | Developing |
+| EMOO Base | POST | `/data/table` | 创建表 | Developing（未部署） |
+| EMOO Base | GET | `/data/table` | 获取表列表 | Developing（未部署） |
+| EMOO Base | PUT | `/data/table` | 更新表 | Developing（未部署） |
+| EMOO Base | DELETE | `/data/table` | 删除表 | Developing（未部署） |
+| EMOO Base | GET | `/data/table` | 获取表详情 | Developing（未部署） |
+| EMOO Base | POST | `/data/table/columns` | 添加列 | Developing（未部署） |
+| EMOO Base | PUT | `/data/table/columns` | 更新列 | Developing（未部署） |
+| EMOO Base | DELETE | `/data/table/columns` | 删除列 | Developing（未部署） |
 | 应用管理 | GET | `/apps` | 获取应用列表 | Released |
 | 应用管理 | GET | `/app/{ws_app_key}/doc-groups` | 获取文档组列表 | Released |

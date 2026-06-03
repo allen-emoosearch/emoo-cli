@@ -183,3 +183,225 @@ def record_list(ctx, table_key, table_name, page_size, current_page, filters, so
     client = EmooClient(base_url=ctx.obj.get("base_url"), user_id=ctx.obj.get("user_id"))
     resp = client.post("/data/records/list", body=body)
     output(resp, as_json=ctx.obj.get("as_json", False))
+
+
+# ── Table management ──────────────────────────────────────────────
+
+def _parse_json_or_file(value, name="参数"):
+    """Parse a JSON string or file path."""
+    try:
+        return json.loads(value)
+    except json.JSONDecodeError:
+        try:
+            with open(value) as f:
+                return json.load(f)
+        except FileNotFoundError:
+            raise click.BadParameter(f"{name} 文件不存在: {value}")
+        except json.JSONDecodeError as e:
+            raise click.BadParameter(f"{name} 文件 JSON 格式错误: {e}")
+
+
+@base.command(name="table-create")
+@click.option("--table-name", "-n", required=True, help="表名称")
+@click.option("--extra", default=None, help="扩展元数据 JSON 对象或文件路径")
+@click.option("--columns", default=None, help="初始列定义 JSON 数组或文件路径 (ColumnDef)")
+@click.pass_context
+def table_create(ctx, table_name, extra, columns):
+    """创建数据表，可同时指定初始列定义。"""
+    body: dict = {"table_name": table_name}
+    if extra:
+        body["extra"] = _parse_json_or_file(extra, "extra")
+    if columns:
+        cols = _parse_json_or_file(columns, "columns")
+        if not isinstance(cols, list):
+            raise click.BadParameter("columns 必须是 JSON 数组")
+        body["columns"] = cols
+
+    client = EmooClient(base_url=ctx.obj.get("base_url"), user_id=ctx.obj.get("user_id"))
+    resp = client.post("/data/table", body=body)
+    success(resp, as_json=ctx.obj.get("as_json", False))
+
+
+@base.command(name="table-list")
+@click.option("--page-size", default=20, help="每页数量 (最大100)")
+@click.option("--current-page", default=1, help="页码")
+@click.pass_context
+def table_list(ctx, page_size, current_page):
+    """分页获取数据表列表。"""
+    if page_size > 100:
+        raise click.BadParameter(f"page-size 最大 100，当前为 {page_size}")
+
+    params = {"page_size": page_size, "current_page": current_page}
+    client = EmooClient(base_url=ctx.obj.get("base_url"), user_id=ctx.obj.get("user_id"))
+    resp = client.get("/data/table", params=params)
+    output(resp, as_json=ctx.obj.get("as_json", False))
+
+
+@base.command(name="table-update")
+@click.option("--table-key", default=None, help="表标识 (与 --table-name 二选一)")
+@click.option("--table-name", default=None, help="表名称 (与 --table-key 二选一)")
+@click.option("--new-table-name", default=None, help="新表名称 (与 --extra 二选一)")
+@click.option("--extra", default=None, help="扩展元数据 JSON 对象或文件路径")
+@click.pass_context
+def table_update(ctx, table_key, table_name, new_table_name, extra):
+    """更新数据表名称或扩展元数据。"""
+    _ensure_table(table_key, table_name)
+    if not new_table_name and not extra:
+        raise click.BadParameter("需要 --new-table-name 或 --extra")
+
+    body: dict = {}
+    if table_key:
+        body["table_key"] = table_key
+    else:
+        body["table_name"] = table_name
+    if new_table_name:
+        body["new_table_name"] = new_table_name
+    if extra:
+        body["extra"] = _parse_json_or_file(extra, "extra")
+
+    client = EmooClient(base_url=ctx.obj.get("base_url"), user_id=ctx.obj.get("user_id"))
+    resp = client.put("/data/table", body=body)
+    success(resp, as_json=ctx.obj.get("as_json", False))
+
+
+@base.command(name="table-delete")
+@click.option("--table-key", default=None, help="表标识 (与 --table-name 二选一)")
+@click.option("--table-name", default=None, help="表名称 (与 --table-key 二选一)")
+@click.pass_context
+def table_delete(ctx, table_key, table_name):
+    """软删除数据表。"""
+    _ensure_table(table_key, table_name)
+
+    body: dict = {}
+    if table_key:
+        body["table_key"] = table_key
+    else:
+        body["table_name"] = table_name
+
+    client = EmooClient(base_url=ctx.obj.get("base_url"), user_id=ctx.obj.get("user_id"))
+    resp = client.delete("/data/table", body=body)
+    success(resp, as_json=ctx.obj.get("as_json", False))
+
+
+@base.command(name="table-get")
+@click.option("--table-key", default=None, help="表标识 (与 --table-name 二选一)")
+@click.option("--table-name", default=None, help="表名称 (与 --table-key 二选一)")
+@click.pass_context
+def table_get(ctx, table_key, table_name):
+    """获取表详情（含完整列信息）。"""
+    _ensure_table(table_key, table_name)
+
+    params = {}
+    if table_key:
+        params["table_key"] = table_key
+    else:
+        params["table_name"] = table_name
+
+    client = EmooClient(base_url=ctx.obj.get("base_url"), user_id=ctx.obj.get("user_id"))
+    resp = client.get("/data/table", params=params)
+    output(resp, as_json=ctx.obj.get("as_json", False))
+
+
+# ── Column management ────────────────────────────────────────────
+
+@base.command(name="column-add")
+@click.option("--table-key", default=None, help="表标识 (与 --table-name 二选一)")
+@click.option("--table-name", default=None, help="表名称 (与 --table-key 二选一)")
+@click.option("--column-name", "-n", required=True, help="列名称")
+@click.option("--type", "-t", "col_type", required=True,
+              type=click.Choice(["string", "number", "boolean", "date", "time",
+                                 "datetime", "reference", "file", "user", "group", "select"]),
+              help="列类型")
+@click.option("--title-column/--no-title-column", default=False, help="是否为标题列")
+@click.option("--multiple/--no-multiple", default=False, help="是否多选")
+@click.option("--reference-table-key", default=None, help="关联表的 table_key (reference 类型时使用)")
+@click.option("--options", default=None, help="列选项 JSON 对象或文件路径 (select 类型时使用)")
+@click.option("--extra", default=None, help="扩展元数据 JSON 对象或文件路径")
+@click.pass_context
+def column_add(ctx, table_key, table_name, column_name, col_type, title_column,
+               multiple, reference_table_key, options, extra):
+    """向数据表添加一列。"""
+    _ensure_table(table_key, table_name)
+
+    body: dict = {"column_name": column_name, "type": col_type}
+    if table_key:
+        body["table_key"] = table_key
+    else:
+        body["table_name"] = table_name
+    if title_column:
+        body["title_column"] = True
+    if multiple:
+        body["multiple"] = True
+    if reference_table_key:
+        body["reference_table_key"] = reference_table_key
+    if options:
+        body["options"] = _parse_json_or_file(options, "options")
+    if extra:
+        body["extra"] = _parse_json_or_file(extra, "extra")
+
+    client = EmooClient(base_url=ctx.obj.get("base_url"), user_id=ctx.obj.get("user_id"))
+    resp = client.post("/data/table/columns", body=body)
+    success(resp, as_json=ctx.obj.get("as_json", False))
+
+
+@base.command(name="column-update")
+@click.option("--table-key", default=None, help="表标识 (与 --table-name 二选一)")
+@click.option("--table-name", default=None, help="表名称 (与 --table-key 二选一)")
+@click.option("--column-key", default=None, help="列标识 (与 --column-name 二选一)")
+@click.option("--column-name", default=None, help="列名称 (与 --column-key 二选一)")
+@click.option("--new-column-name", default=None, help="新列名称")
+@click.option("--extra", default=None, help="扩展元数据 JSON 对象或文件路径")
+@click.pass_context
+def column_update(ctx, table_key, table_name, column_key, column_name,
+                  new_column_name, extra):
+    """更新列属性。"""
+    _ensure_table(table_key, table_name)
+    if not column_key and not column_name:
+        raise click.BadParameter("需要 --column-key 或 --column-name")
+    if not new_column_name and not extra:
+        raise click.BadParameter("需要 --new-column-name 或 --extra")
+
+    body: dict = {}
+    if table_key:
+        body["table_key"] = table_key
+    else:
+        body["table_name"] = table_name
+    if column_key:
+        body["column_key"] = column_key
+    else:
+        body["column_name"] = column_name
+    if new_column_name:
+        body["new_column_name"] = new_column_name
+    if extra:
+        body["extra"] = _parse_json_or_file(extra, "extra")
+
+    client = EmooClient(base_url=ctx.obj.get("base_url"), user_id=ctx.obj.get("user_id"))
+    resp = client.put("/data/table/columns", body=body)
+    success(resp, as_json=ctx.obj.get("as_json", False))
+
+
+@base.command(name="column-delete")
+@click.option("--table-key", default=None, help="表标识 (与 --table-name 二选一)")
+@click.option("--table-name", default=None, help="表名称 (与 --table-key 二选一)")
+@click.option("--column-key", default=None, help="列标识 (与 --column-name 二选一)")
+@click.option("--column-name", default=None, help="列名称 (与 --column-key 二选一)")
+@click.pass_context
+def column_delete(ctx, table_key, table_name, column_key, column_name):
+    """软删除列。"""
+    _ensure_table(table_key, table_name)
+    if not column_key and not column_name:
+        raise click.BadParameter("需要 --column-key 或 --column-name")
+
+    body: dict = {}
+    if table_key:
+        body["table_key"] = table_key
+    else:
+        body["table_name"] = table_name
+    if column_key:
+        body["column_key"] = column_key
+    else:
+        body["column_name"] = column_name
+
+    client = EmooClient(base_url=ctx.obj.get("base_url"), user_id=ctx.obj.get("user_id"))
+    resp = client.delete("/data/table/columns", body=body)
+    success(resp, as_json=ctx.obj.get("as_json", False))

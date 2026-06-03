@@ -228,5 +228,128 @@
     "path_params": [
       {"name": "ws_app_key", "type": "string", "required": true, "desc": "应用 Key"}
     ]
+  },
+  "base.table-create": {
+    "method": "POST",
+    "path": "/data/table",
+    "auth_required": true,
+    "user_id_required": true,
+    "description": "创建数据表，可同时指定初始列定义",
+    "body": [
+      {"name": "table_name", "type": "string", "required": true, "desc": "表名称"},
+      {"name": "extra", "type": "object", "required": false, "desc": "扩展元数据"},
+      {"name": "columns", "type": "array", "required": false, "desc": "初始列定义数组，元素为 ColumnDef：column_name(必填)、type(必填，string/number/boolean/date/time/datetime/reference/file/user/group/select)、title_column、multiple、reference_table_key、options、extra"}
+    ],
+    "response": {
+      "data": "TableWithColumns — table_key, table_name, extra, column_count, record_count, created_at, updated_at, columns[]"
+    }
+  },
+  "base.table-list": {
+    "method": "GET",
+    "path": "/data/table",
+    "auth_required": true,
+    "user_id_required": true,
+    "description": "分页获取数据表列表",
+    "params": [
+      {"name": "page_size", "type": "integer", "required": false, "desc": "每页数量，默认 20，最大 100"},
+      {"name": "current_page", "type": "integer", "required": false, "desc": "页码，从 1 开始，默认 1"}
+    ],
+    "response": {
+      "data.total": "integer — 总表数",
+      "data.results[]": "TableBrief — table_key, table_name, extra, column_count, record_count, created_at, updated_at"
+    }
+  },
+  "base.table-update": {
+    "method": "PUT",
+    "path": "/data/table",
+    "auth_required": true,
+    "user_id_required": true,
+    "description": "更新数据表名称或扩展元数据，通过 table_key 或 table_name 定位",
+    "body": [
+      {"name": "table_key", "type": "string", "required": "条件", "desc": "表标识（与 table_name 二选一）"},
+      {"name": "table_name", "type": "string", "required": "条件", "desc": "表名称（与 table_key 二选一）"},
+      {"name": "new_table_name", "type": "string", "required": "条件", "desc": "新表名称（与 extra 二选一）"},
+      {"name": "extra", "type": "object", "required": "条件", "desc": "扩展元数据（与 new_table_name 二选一）"}
+    ],
+    "response": {
+      "data": "TableBrief — table_key, table_name, extra, column_count, record_count"
+    }
+  },
+  "base.table-delete": {
+    "method": "DELETE",
+    "path": "/data/table",
+    "auth_required": true,
+    "user_id_required": true,
+    "description": "软删除数据表，通过 table_key 或 table_name 定位",
+    "body": [
+      {"name": "table_key", "type": "string", "required": "条件", "desc": "表标识（与 table_name 二选一）"},
+      {"name": "table_name", "type": "string", "required": "条件", "desc": "表名称（与 table_key 二选一）"}
+    ]
+  },
+  "base.table-get": {
+    "method": "GET",
+    "path": "/data/table",
+    "auth_required": true,
+    "user_id_required": true,
+    "description": "获取表详情（含完整列信息），通过 table_key 或 table_name 定位",
+    "params": [
+      {"name": "table_key", "type": "string", "required": "条件", "desc": "表标识（与 table_name 二选一）"},
+      {"name": "table_name", "type": "string", "required": "条件", "desc": "表名称（与 table_key 二选一）"}
+    ],
+    "response": {
+      "data": "TableWithColumns — table_key, table_name, extra, column_count, record_count, created_at, updated_at, columns[](ColumnInfo)"
+    }
+  },
+  "base.column-add": {
+    "method": "POST",
+    "path": "/data/table/columns",
+    "auth_required": true,
+    "user_id_required": true,
+    "description": "向数据表添加一列，通过 table_key 或 table_name 定位目标表",
+    "body": [
+      {"name": "table_key", "type": "string", "required": "条件", "desc": "表标识（与 table_name 二选一）"},
+      {"name": "table_name", "type": "string", "required": "条件", "desc": "表名称（与 table_key 二选一）"},
+      {"name": "column_name", "type": "string", "required": true, "desc": "列名称"},
+      {"name": "type", "type": "string", "required": true, "desc": "列类型：string/number/boolean/date/time/datetime/reference/file/user/group/select"},
+      {"name": "title_column", "type": "boolean", "required": false, "desc": "是否为标题列，默认 false"},
+      {"name": "multiple", "type": "boolean", "required": false, "desc": "是否多选，默认 false"},
+      {"name": "reference_table_key", "type": "string", "required": false, "desc": "关联表的 table_key（reference 类型时使用）"},
+      {"name": "options", "type": "object", "required": false, "desc": "列选项（select 类型时使用）"},
+      {"name": "extra", "type": "object", "required": false, "desc": "扩展元数据"}
+    ],
+    "response": {
+      "data": "ColumnInfo — column_key, column_name, type, table_key, title_column, multiple, order, reference_table_key, options, extra"
+    }
+  },
+  "base.column-update": {
+    "method": "PUT",
+    "path": "/data/table/columns",
+    "auth_required": true,
+    "user_id_required": true,
+    "description": "更新列属性，通过 table_key/table_name + column_key/column_name 定位",
+    "body": [
+      {"name": "table_key", "type": "string", "required": "条件", "desc": "表标识（与 table_name 二选一）"},
+      {"name": "table_name", "type": "string", "required": "条件", "desc": "表名称（与 table_key 二选一）"},
+      {"name": "column_key", "type": "string", "required": "条件", "desc": "列标识（与 column_name 二选一）"},
+      {"name": "column_name", "type": "string", "required": "条件", "desc": "列名称（与 column_key 二选一）"},
+      {"name": "new_column_name", "type": "string", "required": false, "desc": "新列名"},
+      {"name": "extra", "type": "object", "required": false, "desc": "扩展元数据"}
+    ],
+    "response": {
+      "data": "ColumnInfo"
+    }
+  },
+  "base.column-delete": {
+    "method": "DELETE",
+    "path": "/data/table/columns",
+    "auth_required": true,
+    "user_id_required": true,
+    "description": "软删除列，通过 table_key/table_name + column_key/column_name 定位",
+    "body": [
+      {"name": "table_key", "type": "string", "required": "条件", "desc": "表标识（与 table_name 二选一）"},
+      {"name": "table_name", "type": "string", "required": "条件", "desc": "表名称（与 table_key 二选一）"},
+      {"name": "column_key", "type": "string", "required": "条件", "desc": "列标识（与 column_name 二选一）"},
+      {"name": "column_name", "type": "string", "required": "条件", "desc": "列名称（与 column_key 二选一）"}
+    ]
   }
 }
