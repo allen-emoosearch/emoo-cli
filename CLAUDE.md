@@ -19,6 +19,7 @@ emoo auth login --api-key <key>                  # API Key 登录 (推荐)
 emoo auth login [--client-id <id>]               # OAuth2 登录
 emoo auth status                                  # 查看认证状态 + token 有效期
 emoo auth set-default-user-id <open_id>          # 设置默认 User ID (OAuth2)
+emoo auth set-base-url [<url>]                   # 查看/切换 Base URL
 
 emoo api GET /v1/<path>                           # L3 通用透传 (覆盖 100% API)
 emoo api POST /v1/<path> -d '<json>'              # L3 POST 透传 (body 支持 string/file/stdin)

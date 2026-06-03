@@ -1141,6 +1141,7 @@ export EMOO_USER_ID=open_xxx
 emoo auth login [--api-key <key>]          登录 (API Key 推荐 / OAuth2)
 emoo auth status                           查看认证状态
 emoo auth set-default-user-id <open_id>    设置默认 User ID (OAuth2)
+emoo auth set-base-url [<url>]            查看/切换 Base URL
 
 emoo api GET /v1/<path>                    通用 API 透传 (L3, 覆盖 100%)
 emoo api POST /v1/<path> -d <json>         通用 POST 透传

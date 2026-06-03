@@ -9,7 +9,7 @@ from ..formatters import token_status, output
 
 @click.group()
 def auth():
-    """鉴权管理 (登录、查看状态、设置默认用户)."""
+    """鉴权管理 (登录、查看状态、设置默认用户、切换Endpoint)."""
 
 
 @auth.command()
@@ -71,3 +71,20 @@ def set_default_user_id(user_id, username):
     if username:
         config.set_("default_user_name", username)
     click.echo(f"默认 User ID 已设置为: {user_id}" + (f" ({username})" if username else ""))
+
+
+@auth.command(name="set-base-url")
+@click.argument("base_url", required=False)
+def set_base_url(base_url):
+    """设置/查看 Base URL (持久化到 ~/.emoo/config.json).
+
+    \b
+    不带参数时显示当前 Base URL，带参数时更新。
+    """
+    if not base_url:
+        current = config.get_base_url()
+        click.echo(f"当前 Base URL: {current}")
+        return
+
+    config.set_("base_url", base_url)
+    click.echo(f"Base URL 已设置为: {base_url}")
