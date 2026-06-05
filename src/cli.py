@@ -2,6 +2,7 @@
 
 import json
 import sys
+from importlib.metadata import version as _pkg_version
 
 import click
 
@@ -25,6 +26,11 @@ EPILOG = """\b
 
 
 @click.group(epilog=EPILOG)
+@click.version_option(
+    version=_pkg_version("emoo-cli"),
+    prog_name="emoo-cli",
+    message="%(prog)s v%(version)s",
+)
 @click.option("--json", "as_json", is_flag=True, help="输出原始 JSON 格式")
 @click.option("--user-id", envvar="EMOO_USER_ID",
               help="用户 open_id (OAuth2 方式，可用 emoo contact list 获取)")
