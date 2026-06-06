@@ -130,14 +130,28 @@ class EmooClient:
                 del _cache[key]
 
         self._ensure_token()
-        resp = requests.request(
-            method,
-            f"{self.base_url}{path}",
-            headers=self._headers(),
-            params=params,
-            json=body,
-            timeout=60,
-        )
+        # Retry up to 3 times on transient network errors
+        last_error = None
+        for attempt in range(3):
+            try:
+                resp = requests.request(
+                    method,
+                    f"{self.base_url}{path}",
+                    headers=self._headers(),
+                    params=params,
+                    json=body,
+                    timeout=60,
+                )
+                break
+            except (requests.exceptions.SSLError,
+                    requests.exceptions.ConnectionError,
+                    requests.exceptions.Timeout) as e:
+                last_error = e
+                if attempt < 2:
+                    time.sleep(1 * (attempt + 1))
+        else:
+            raise last_error  # type: ignore[misc]
+
         try:
             result = self._check_response(resp)
         except AuthError:

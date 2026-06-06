@@ -48,8 +48,8 @@ def _parse_time_expression(query: str) -> tuple:
 
 def _extract_search_keywords(query: str) -> list[str]:
     """Extract meaningful search keywords from the query, excluding time words."""
-    # Remove time expressions
-    cleaned = re.sub(r'最近?[一1]?[周月个]|最近?\d*天|本周|本月|今天|昨天', '', query)
+    # Remove time expressions (order matters: longer patterns first)
+    cleaned = re.sub(r'最近[一1][周月]|最近\d*天|近[一1]?[周月个]|本周|本月|今天|昨天|最近', '', query)
     # Remove common filler
     cleaned = re.sub(r'的|情况|一下|帮我|查|看|分析', '', cleaned)
     # Extract Chinese words >= 2 chars
@@ -98,23 +98,119 @@ def _match_rooms(km: dict, keywords: list[str], min_match: int = 1) -> list[dict
     return matches
 
 
+def _discover_chat_tables(km: dict) -> list[dict]:
+    """Discover chat-type Base tables from knowledge map.
+    Returns list of {table_name, time_field, user_field, content_field, group_field}.
+    """
+    tables = []
+    time_candidates = ["msgtime", "created_at", "updated_at", "synced_at", "date", "time"]
+    user_candidates = ["from_user", "user", "username", "sender", "from"]
+    content_candidates = ["content", "text", "message", "body", "msg"]
+    group_candidates = ["roomid", "room_id", "group_id", "channel", "room"]
+
+    for tbl in km.get("base_tables", []):
+        if tbl.get("type") != "chat":
+            continue
+        fields = {f["name"]: f for f in tbl.get("fields", [])}
+
+        discovered = {
+            "table_name": tbl["table_name"],
+            "time_field": None,
+            "user_field": None,
+            "content_field": None,
+            "group_field": None,
+        }
+
+        # Discover by pattern matching
+        for fname in fields:
+            fn_lower = fname.lower().replace("_", "")
+            for tc in time_candidates:
+                if tc in fn_lower:
+                    discovered["time_field"] = fname
+                    break
+            for uc in user_candidates:
+                if uc in fn_lower:
+                    discovered["user_field"] = fname
+                    break
+            for cc in content_candidates:
+                if cc in fn_lower:
+                    discovered["content_field"] = fname
+                    break
+            for gc in group_candidates:
+                if gc in fn_lower:
+                    discovered["group_field"] = fname
+                    break
+
+        # If room data exists, use roomid from there
+        if tbl.get("rooms"):
+            discovered["group_field"] = discovered["group_field"] or "roomid"
+
+        if discovered["time_field"] and discovered["content_field"]:
+            tables.append(discovered)
+
+    return tables
+
+
+def _match_rooms(km: dict, keywords: list[str], min_match: int = 1) -> list[dict]:
+    """Match user keywords against room keywords from knowledge map.
+    Returns list of matched rooms with table_name + group_field for querying.
+    """
+    matches = []
+    chat_tables = _discover_chat_tables(km)
+
+    for tbl in chat_tables:
+        table_name = tbl["table_name"]
+        group_field = tbl["group_field"] or "roomid"
+
+        # Find the matching Base table entry
+        tbl_entry = None
+        for bt in km.get("base_tables", []):
+            if bt.get("table_name") == table_name:
+                tbl_entry = bt
+                break
+        if not tbl_entry:
+            continue
+
+        for room in tbl_entry.get("rooms", []):
+            # Collect keywords from threads
+            all_room_kw = set()
+            for th in room.get("threads", []):
+                all_room_kw.update(th.get("keywords", []))
+            for u in room.get("top_users", []):
+                all_room_kw.add(u.get("user", ""))
+
+            # Match
+            matched = []
+            for uk in keywords:
+                for rk in all_room_kw:
+                    if uk in rk or rk in uk:
+                        matched.append(uk)
+                        break
+
+            if len(set(matched)) >= min_match:
+                matches.append({
+                    "table_name": table_name,
+                    "group_field": group_field,
+                    "group_id": room["roomid"],
+                    "msgs": room.get("total_msgs", 0),
+                    "users": room.get("user_count", 0),
+                    "matched_keywords": list(set(matched)),
+                    "score": len(set(matched)),
+                })
+
+    matches.sort(key=lambda x: -x["score"])
+    return matches
+
+
 def run_analyze(client, query: str, km_path: Optional[str] = None) -> dict:
     """Execute the full intelligent analysis pipeline.
 
-    Args:
-        client: EmooClient instance
-        query: natural language query
-        km_path: path to knowledge map JSON
-
-    Returns:
-        dict with keys: query, keywords, time_range, matched_rooms, results, summary
+    Dynamically discovers chat tables, group fields, and time fields
+    from the knowledge map — no hardcoded field names.
     """
-    from .knowledge_map import _extract_keywords as _kw_extract
-
     # 1. Load knowledge map
     if km_path is None:
         km_path = os.path.expanduser("~/.emoo/knowledge_map")
-        # Find most recent namespace
         if os.path.isdir(km_path):
             api_paths = [d for d in os.listdir(km_path)
                         if os.path.isdir(os.path.join(km_path, d))]
@@ -127,41 +223,51 @@ def run_analyze(client, query: str, km_path: Optional[str] = None) -> dict:
         with open(km_path, encoding="utf-8") as f:
             km = json.load(f)
 
-    # 2. Parse time + keywords
+    # 2. Discover chat tables and their fields
+    chat_tables = _discover_chat_tables(km)
+    if not chat_tables:
+        return {"query": query, "keywords": [], "time_range": [], "matched_rooms": [],
+                "total": 0, "summary": "未找到聊天表，请先运行 knowledge-map 生成知识图谱"}
+
+    # 3. Parse time + keywords
     start, end = _parse_time_expression(query)
     keywords = _extract_search_keywords(query)
 
     print(f"🔍 分析: {query}")
     print(f"   关键词: {keywords}")
     print(f"   时间: {start} ~ {end}")
+    print(f"   聊天表: {len(chat_tables)} 个")
 
-    # 3. Match rooms
+    # 4. Match rooms across all chat tables
     matched_rooms = _match_rooms(km, keywords) if km else []
     print(f"   匹配群: {len(matched_rooms)} 个")
 
-    # 4. Search matched rooms
+    # 5. Search matched rooms using discovered field names
     all_results = []
-    rooms_searched = matched_rooms[:5] if matched_rooms else []  # top 5 rooms
+    rooms_searched = matched_rooms[:5] if matched_rooms else []
+
+    # Build a lookup: table_name → discovered fields
+    tbl_map = {t["table_name"]: t for t in chat_tables}
 
     for room in rooms_searched:
-        rid = room["roomid"]
-        print(f"   搜索群 {rid[:20]}... (关联词: {room['matched_keywords']})")
+        tbl_name = room["table_name"]
+        group_field = room["group_field"]
+        gid = room["group_id"]
+        tbl = tbl_map.get(tbl_name, {})
+        time_field = tbl.get("time_field", "msgtime")
 
-        # Build search keywords from matched terms
-        search_kw = "|".join(room["matched_keywords"])
+        print(f"   搜索 [{tbl_name}] {gid[:20]}... (关联词: {room['matched_keywords']})")
 
-        # Fetch records for this room
         page = 1
         room_results = []
         while True:
             resp = client.post("/data/records/list", body={
-                "table_name": "企微会话存档",
+                "table_name": tbl_name,
                 "page_size": 100,
                 "current_page": page,
                 "filters": [
-                    f"msgtime:gte:{start}",
-                    f"msgtime:lte:{end}",
-                    "msgtype:eq:text",
+                    f"{time_field}:gte:{start}",
+                    f"{time_field}:lte:{end}",
                 ],
             })
             data = resp.get("data", {})
@@ -169,62 +275,66 @@ def run_analyze(client, query: str, km_path: Optional[str] = None) -> dict:
             if not recs:
                 break
 
-            # Filter by roomid + keyword
+            # Filter by group + keyword (client-side)
             for r in recs:
-                if r.get("fields", {}).get("roomid") != rid:
+                f = r.get("fields", {})
+                if f.get(group_field) != gid:
                     continue
-                content = str(r.get("fields", {}).get("content", ""))
+                content = str(f.get(tbl.get("content_field", "content"), ""))
                 if any(kw in content for kw in keywords):
+                    r["_group_field"] = group_field
+                    r["_group_id"] = gid
+                    r["_table"] = tbl_name
                     room_results.append(r)
 
             page += 1
-            if not data.get("has_more") and not data.get("total", 0) > page * 100:
+            if len(room_results) >= 500:
                 break
 
         # Dedup by content
         seen = set()
         unique = []
         for r in room_results:
-            c = str(r["fields"].get("content", ""))
+            c = str(r["fields"].get(tbl.get("content_field", "content"), ""))
             h = hash(c)
             if h not in seen:
                 seen.add(h)
                 unique.append(r)
 
-        unique.sort(key=lambda r: (r["fields"].get("msgtime", ""),
+        user_field = tbl.get("user_field", "from_user")
+        unique.sort(key=lambda r: (r["fields"].get(time_field, ""),
                                     r["fields"].get("seq", 0)))
         all_results.extend(unique)
         print(f"      找到 {len(unique)} 条 (去重后)")
 
-    # 5. Aggregate
+    # 6. Aggregate using discovered fields
     if not all_results:
         return {
-            "query": query,
-            "keywords": keywords,
-            "time_range": [start, end],
-            "matched_rooms": matched_rooms,
-            "total": 0,
-            "summary": "未找到匹配内容",
+            "query": query, "keywords": keywords,
+            "time_range": [start, end], "matched_rooms": matched_rooms,
+            "total": 0, "summary": "未找到匹配内容",
         }
 
-    all_results.sort(key=lambda r: (r["fields"].get("msgtime", ""),
+    # Use the first chat table's field mapping for extraction
+    default_tbl = chat_tables[0] if chat_tables else {}
+    time_field = default_tbl.get("time_field", "msgtime")
+    user_field = default_tbl.get("user_field", "from_user")
+    content_field = default_tbl.get("content_field", "content")
+
+    all_results.sort(key=lambda r: (r["fields"].get(time_field, ""),
                                      r["fields"].get("seq", 0)))
 
-    # Extract structured info
-    all_text = " ".join(str(r["fields"].get("content", "")) for r in all_results)
-
-    # Key people
-    people = Counter(r["fields"].get("from_user", "?") for r in all_results)
-    # Dates distribution
-    dates = Counter(r["fields"].get("msgtime", "")[:10] for r in all_results
-                    if r["fields"].get("msgtime"))
+    people = Counter(r["fields"].get(user_field, "?") for r in all_results)
+    dates = Counter(r["fields"].get(time_field, "")[:10] for r in all_results
+                    if r["fields"].get(time_field))
 
     return {
         "query": query,
         "keywords": keywords,
         "time_range": [start, end],
         "matched_rooms": [{
-            "roomid": r["roomid"],
+            "table": r["table_name"],
+            "group_id": r["group_id"],
             "score": r["score"],
             "matched_keywords": r["matched_keywords"],
         } for r in matched_rooms[:5]],
@@ -232,9 +342,10 @@ def run_analyze(client, query: str, km_path: Optional[str] = None) -> dict:
         "by_date": {d: c for d, c in sorted(dates.items())},
         "top_people": [{"user": u, "count": c} for u, c in people.most_common(10)],
         "samples": [{
-            "time": r["fields"].get("msgtime", ""),
-            "user": r["fields"].get("from_user", ""),
-            "content": str(r["fields"].get("content", ""))[:200],
-            "room": r["fields"].get("roomid", "")[:20],
+            "table": r.get("_table", ""),
+            "time": r["fields"].get(time_field, ""),
+            "user": r["fields"].get(user_field, ""),
+            "content": str(r["fields"].get(content_field, ""))[:200],
+            "group": str(r.get("_group_id", ""))[:20],
         } for r in all_results[:20]],
     }
