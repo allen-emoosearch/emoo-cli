@@ -88,3 +88,11 @@ def set_base_url(base_url):
 
     config.set_("base_url", base_url)
     click.echo(f"Base URL 已设置为: {base_url}")
+
+
+@auth.command(name="clear-cache")
+def clear_cache():
+    """清除请求缓存 (包括 GET 请求缓存)."""
+    from ..client import clear_cache as _clear_cache
+    _clear_cache()
+    click.echo("请求缓存已清除")

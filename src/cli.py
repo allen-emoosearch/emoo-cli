@@ -34,13 +34,23 @@ _V = _pkg_version("emoo-cli")
               help="用户 open_id (OAuth2 方式，可用 emoo contact list 获取)")
 @click.option("--base-url", envvar="EMOO_BASE_URL",
               help="API Base URL (默认 https://app.emoosearch.com/open-api/v1)")
+@click.option("--no-cache", "no_cache", is_flag=True, default=False,
+              help="禁用请求缓存 (默认开启5分钟)")
+@click.option("--cache-ttl", "cache_ttl", type=int, default=None,
+              help="请求缓存 TTL 秒数 (默认300)")
 @click.pass_context
-def cli(ctx, as_json, user_id, base_url):
+def cli(ctx, as_json, user_id, base_url, no_cache, cache_ttl):
     """EMOO 开放平台命令行工具 — 鉴权、通讯录、数据搜索、对话、消息推送、Base 数据表操作、应用概览."""
+    from .client import set_cache_ttl as _set_cache_ttl
     ctx.ensure_object(dict)
     ctx.obj["as_json"] = as_json
     ctx.obj["user_id"] = user_id
     ctx.obj["base_url"] = base_url
+    ctx.obj["no_cache"] = no_cache
+    if no_cache:
+        _set_cache_ttl(0)
+    elif cache_ttl is not None:
+        _set_cache_ttl(cache_ttl)
     set_json_mode(as_json)
 
 

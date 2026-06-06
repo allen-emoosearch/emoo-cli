@@ -1,5 +1,7 @@
-"""HTTP client with auto token management, auto-refresh, and 4083 retry."""
+"""HTTP client with auto token management, auto-refresh, 4083 retry, and request caching."""
 
+import hashlib
+import json as _json
 import time
 from typing import Optional
 
@@ -8,12 +10,30 @@ import requests
 from . import config
 from .errors import AuthError, from_api_response, EmooError
 
+# Global cache shared across all client instances
+_cache: dict[str, tuple[float, dict]] = {}
+_cache_ttl: int = 300  # 5 minutes default, 0 = disabled
+
+
+def set_cache_ttl(seconds: int):
+    """Set request cache TTL. 0 disables caching."""
+    global _cache_ttl
+    _cache_ttl = seconds
+
+
+def clear_cache():
+    """Clear the request cache."""
+    global _cache
+    _cache = {}
+
 
 class EmooClient:
-    def __init__(self, base_url: Optional[str] = None, user_id: Optional[str] = None):
+    def __init__(self, base_url: Optional[str] = None, user_id: Optional[str] = None,
+                 use_cache: bool = True):
         self.base_url = (base_url or config.get_base_url()).rstrip("/")
         self._use_api_key = config.is_api_key_auth()
         self.user_id = None if self._use_api_key else (user_id or config.get_default_user_id())
+        self._use_cache = use_cache
         if not self._use_api_key:
             self._ensure_token()
 
@@ -85,9 +105,30 @@ class EmooClient:
             )
         return body
 
+    def _cache_key(self, method: str, path: str,
+                   params: Optional[dict] = None,
+                   body: Optional[dict] = None) -> str:
+        """Generate a cache key from request parameters."""
+        raw = f"{method}|{path}|{_json.dumps(params or {}, sort_keys=True)}|{_json.dumps(body or {}, sort_keys=True)}"
+        return hashlib.md5(raw.encode()).hexdigest()
+
     def _request(self, method: str, path: str,
                  params: Optional[dict] = None, body: Optional[dict] = None) -> dict:
-        """Make HTTP request, auto-refresh token on auth error and retry once."""
+        """Make HTTP request, auto-refresh token on auth error and retry once.
+
+        Caches GET requests according to _cache_ttl (default 5 min).
+        """
+        global _cache, _cache_ttl
+
+        # Check cache (GET only for safety)
+        if self._use_cache and _cache_ttl > 0 and method == "GET":
+            key = self._cache_key(method, path, params, body)
+            if key in _cache:
+                ts, data = _cache[key]
+                if time.time() - ts < _cache_ttl:
+                    return data
+                del _cache[key]
+
         self._ensure_token()
         resp = requests.request(
             method,
@@ -98,7 +139,7 @@ class EmooClient:
             timeout=60,
         )
         try:
-            return self._check_response(resp)
+            result = self._check_response(resp)
         except AuthError:
             if not self._use_api_key:
                 self._refresh_token()
@@ -110,8 +151,16 @@ class EmooClient:
                     json=body,
                     timeout=60,
                 )
-                return self._check_response(resp)
-            raise
+                result = self._check_response(resp)
+            else:
+                raise
+
+        # Store in cache
+        if self._use_cache and _cache_ttl > 0 and method == "GET":
+            key = self._cache_key(method, path, params, body)
+            _cache[key] = (time.time(), result)
+
+        return result
 
     def request(self, method: str, path: str,
                 params: Optional[dict] = None, body: Optional[dict] = None) -> dict:
