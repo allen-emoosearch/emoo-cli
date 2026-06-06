@@ -3,6 +3,7 @@
 import json
 import os
 import sys
+import time
 
 import click
 
@@ -13,6 +14,20 @@ from ..formatters import output
 def _progress(msg: str, **kwargs) -> None:
     """Write progress/info to stderr so stdout stays clean for JSON consumers."""
     click.echo(msg, err=True, **kwargs)
+
+
+def _default_km_path() -> str:
+    """Resolve the default knowledge map path, namespaced by API key."""
+    cfg = {}
+    try:
+        with open(os.path.expanduser("~/.emoo/config.json")) as f:
+            cfg = json.load(f)
+    except Exception:
+        pass
+    api_prefix = (cfg.get("api_key", "") or cfg.get("client_id", "default"))[:12]
+    return os.path.expanduser(f"~/.emoo/knowledge_map/{api_prefix}/emoo_knowledge_map.json")
+
+
 from ..skills import generate_knowledge_map, analyze_intent, execute_search_plan
 from ..skills.search import export_results_csv
 from ..skills.loader import (
@@ -232,8 +247,8 @@ def show(ctx, name, params_only):
 @click.argument("name")
 @click.option("--csv", "csv_path", default=None, help="导出 CSV 文件路径")
 @click.option("--max-results", default=200, help="最大结果数 (默认200)")
-@click.option("-k", "--knowledge-map", "km_path", default="emoo_knowledge_map.json",
-              help="知识图谱路径 (默认 ./emoo_knowledge_map.json)")
+@click.option("-k", "--knowledge-map", "km_path", default=None,
+              help="知识图谱路径 (默认 ~/.emoo/knowledge_map/emoo_knowledge_map.json)")
 @click.pass_context
 def run(ctx, name, csv_path, max_results, km_path):
     """执行 skill 搜索.
@@ -280,6 +295,11 @@ def run(ctx, name, csv_path, max_results, km_path):
         raise click.UsageError("参数校验失败，请检查后重试")
 
     client = EmooClient(base_url=ctx.obj.get("base_url"), user_id=ctx.obj.get("user_id"))
+
+    if km_path is None:
+        default_km = _default_km_path()
+        if os.path.exists(default_km):
+            km_path = default_km
 
     _progress(f"执行 skill: {sd.name}")
 
@@ -390,43 +410,83 @@ def pipeline():
 @pipeline.command()
 @click.option("--max-sample-per-group", default=5, help="每个文档组采样标题数 (默认5)")
 @click.option("--max-doc-groups", default=200, help="最大采样文档组数 (默认200)")
-@click.option("-o", "--output-dir", default=".", help="输出目录 (默认当前目录)")
+@click.option("-o", "--output-dir", default=None, help="输出目录 (默认 ~/.emoo/knowledge_map/)")
+@click.option("--auto/--no-auto", "auto_mode", default=True, help="自动缓存模式: 24h内未过期则跳过生成 (默认开启)")
+@click.option("--ttl", default="24h", help="缓存有效期 (格式: Nh, 默认 24h)")
+@click.option("--refresh", "force_refresh", is_flag=True, default=False, help="强制重新生成，忽略缓存")
 @click.pass_context
-def knowledge_map(ctx, max_sample_per_group, max_doc_groups, output_dir):
-    """生成增强知识图谱，包含每个 app 的文档组详情和内容采样.
+def knowledge_map(ctx, max_sample_per_group, max_doc_groups, output_dir, auto_mode, ttl, force_refresh):
+    """生成增强知识图谱，包含 app 文档组详情、标题采样、Base 表嗅探.
 
+    \b
+    缓存策略:
+      --auto (默认): 检查缓存，24h内有效则直接返回
+      --refresh:     强制重新生成
+      --ttl 6h:      自定义缓存有效期
+
+    \b
     输出两个文件:
       emoo_knowledge_map.json  — 机器可读 (供 intent 使用)
       emoo_knowledge_map.md    — 人类可读摘要
-
-    \b
-    示例:
-      emoo skill pipeline knowledge-map
-      emoo skill pipeline knowledge-map --max-sample-per-group 10 -o /tmp
     """
-    client = EmooClient(base_url=ctx.obj.get("base_url"), user_id=ctx.obj.get("user_id"))
+    # Parse TTL
+    ttl_seconds = 86400  # default 24h
+    if ttl.endswith("h"):
+        ttl_seconds = int(ttl[:-1]) * 3600
+    elif ttl.endswith("m"):
+        ttl_seconds = int(ttl[:-1]) * 60
 
-    _progress("正在扫描工作区应用...")
-    json_path = generate_knowledge_map(
-        client,
-        max_sample_per_group=max_sample_per_group,
-        max_doc_groups=max_doc_groups,
-        output_dir=output_dir,
-    )
+    # Default output dir — namespaced by API key to isolate workspaces
+    if output_dir is None:
+        cfg = {}
+        try:
+            with open(os.path.expanduser("~/.emoo/config.json")) as f:
+                cfg = json.load(f)
+        except Exception:
+            pass
+        api_prefix = (cfg.get("api_key", "") or cfg.get("client_id", "default"))[:12]
+        output_dir = os.path.expanduser(f"~/.emoo/knowledge_map/{api_prefix}")
+    os.makedirs(output_dir, exist_ok=True)
 
-    with open(json_path, encoding="utf-8") as f:
-        km = json.load(f)
+    cached_json = os.path.join(output_dir, "emoo_knowledge_map.json")
+    cache_age = 0
+    if os.path.exists(cached_json):
+        cache_age = time.time() - os.path.getmtime(cached_json)
+
+    # Auto mode: skip if cache is fresh
+    if auto_mode and not force_refresh and cache_age > 0 and cache_age < ttl_seconds:
+        _progress(f"📦 使用缓存知识图谱 (生成于 {cache_age/3600:.1f} 小时前, TTL={ttl})")
+        with open(cached_json, encoding="utf-8") as f:
+            km = json.load(f)
+    else:
+        if force_refresh and cache_age > 0:
+            _progress(f"🔄 强制刷新 (缓存已存在 {cache_age/3600:.1f} 小时)")
+        elif cache_age >= ttl_seconds and cache_age > 0:
+            _progress(f"⏰ 缓存已过期 ({cache_age/3600:.1f} 小时前, TTL={ttl}), 重新生成...")
+        else:
+            _progress("正在扫描工作区应用...")
+
+        client = EmooClient(base_url=ctx.obj.get("base_url"), user_id=ctx.obj.get("user_id"))
+        generate_knowledge_map(
+            client,
+            max_sample_per_group=max_sample_per_group,
+            max_doc_groups=max_doc_groups,
+            output_dir=output_dir,
+        )
+        with open(cached_json, encoding="utf-8") as f:
+            km = json.load(f)
 
     apps = km.get("apps", [])
     total_docs = sum(a.get("doc_count", 0) for a in apps)
     total_groups = sum(len(a.get("doc_groups", [])) for a in apps)
+    base_tables = km.get("base_tables", [])
+    base_records = sum(t.get("record_count", 0) for t in base_tables)
 
-    _progress(f"\n知识图谱已生成:")
-    _progress(f"  JSON: {os.path.abspath(json_path)}")
-    _progress(f"  MD:   {os.path.abspath(os.path.join(output_dir, 'emoo_knowledge_map.md'))}")
-    _progress(f"  应用数: {len(apps)}")
-    _progress(f"  文档组数: {total_groups}")
-    _progress(f"  文档总数: {total_docs}")
+    _progress(f"\n知识图谱{' (缓存)' if auto_mode and not force_refresh and cache_age > 0 and cache_age < ttl_seconds else ''}:")
+    _progress(f"  路径: {os.path.abspath(output_dir)}")
+    _progress(f"  应用: {len(apps)} 个, 文档组: {total_groups} 个, 文档: {total_docs} 篇")
+    if base_tables:
+        _progress(f"  Base 表: {len(base_tables)} 个, 记录: {base_records} 条")
 
     if ctx.obj.get("as_json"):
         click.echo(json.dumps(km, ensure_ascii=False, indent=2))
@@ -451,8 +511,8 @@ def knowledge_map(ctx, max_sample_per_group, max_doc_groups, output_dir):
 
 @pipeline.command()
 @click.argument("query")
-@click.option("-k", "--knowledge-map", "km_path", default="emoo_knowledge_map.json",
-              help="知识图谱 JSON 路径 (默认 ./emoo_knowledge_map.json)")
+@click.option("-k", "--knowledge-map", "km_path", default=None,
+              help="知识图谱 JSON 路径 (默认 ~/.emoo/knowledge_map/emoo_knowledge_map.json)")
 @click.option("--top", default=5, help="最多输出几个搜索步骤 (默认5)")
 @click.option("-o", "--output", "output_file", default=None, help="保存搜索方案到文件")
 @click.pass_context
@@ -467,6 +527,11 @@ def intent(ctx, query, km_path, top, output_file):
       emoo skill pipeline intent "上周品项销售情况" --top 3
       emoo skill pipeline intent "最近7天员工考勤" -o plan.json
     """
+    if km_path is None:
+        default_km = _default_km_path()
+        if os.path.exists(default_km):
+            km_path = default_km
+
     result = analyze_intent(query, knowledge_map_path=km_path)
 
     if result.get("error"):
