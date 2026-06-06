@@ -33,11 +33,23 @@ def _sample_titles(client, ws_app_key: str, doc_group_id: str,
         return []
 
 
-def _scan_base_tables(client) -> list[dict]:
-    """Scan all Base tables with field-level sniffing.
+def _classify_table(field_names: set) -> str:
+    """Classify a Base table as 'chat' (conversation log) or 'structured' (business data).
 
-    For each table: fetch sample records, extract field names/types,
-    enumerate low-cardinality field values, and collect content samples.
+    Chat indicators: msgid + msgtype + content + from_user (企微 archive signature)
+    Structured: everything else (CRM, projects, inventory, etc.)
+    """
+    chat_keys = {"msgid", "msgtype", "from_user", "content", "action", "roomid", "seq"}
+    if len(field_names & chat_keys) >= 4:
+        return "chat"
+    return "structured"
+
+
+def _scan_base_tables(client) -> list[dict]:
+    """Scan all Base tables, classify, and apply appropriate sniffing strategy.
+
+    - Chat tables: conversation threading + topic extraction
+    - Structured tables: field profiles + sample row analysis
     """
     tables = []
     try:
@@ -55,10 +67,24 @@ def _scan_base_tables(client) -> list[dict]:
             "column_count": t.get("column_count", 0),
             "record_count": t.get("record_count", 0),
             "fields": [],
+            "type": "empty",
         }
 
         if tbl_name and tbl_key and t.get("record_count", 0) > 0:
-            _sniff_table(client, tbl_name, t_entry)
+            _sniff_table(client, tbl_name, t_entry, sample_size=20)
+            field_names = {f["name"] for f in t_entry["fields"]}
+            tbl_type = _classify_table(field_names)
+            t_entry["type"] = tbl_type
+
+            if tbl_type == "chat":
+                print(f"    🗨️ 检测到聊天表: {tbl_name}, 进行对话线程分析...")
+                _sniff_chat(client, tbl_name, t_entry)
+            else:
+                print(f"    📊 检测到结构化表: {tbl_name}, 进行字段+样本分析...")
+                # Re-sniff with more samples for deeper analysis
+                t_entry["fields"] = []
+                _sniff_table(client, tbl_name, t_entry, sample_size=50)
+                _sniff_sample_rows(client, tbl_name, t_entry)
 
         tables.append(t_entry)
     return tables
@@ -157,6 +183,230 @@ def _sniff_table(client, table_name: str, t_entry: dict, sample_size: int = 50):
         t_entry["fields"].append(f_entry)
 
 
+def _sniff_chat(client, table_name: str, t_entry: dict):
+    """Analyze a chat-like Base table with conversation threading.
+
+    Strategy:
+    1. Fetch recent records grouped by roomid
+    2. Sort each room by msgtime
+    3. Split into conversation threads (gap > 1 hour = new thread)
+    4. Extract topic keywords, participants, date range for each thread
+    5. Summarize the most active threads
+    """
+    all_records = []
+    try:
+        page = 1
+        while True:  # fetch all records
+            resp = client.post("/data/records/list", body={
+                "table_name": table_name,
+                "page_size": 100, "current_page": page,
+            })
+            recs = resp.get("data", {}).get("results", [])
+            if not recs: break
+            all_records.extend(recs)
+            page += 1
+    except Exception:
+        pass
+
+    if not all_records:
+        return
+
+    # Group by roomid
+    rooms = {}
+    for r in all_records:
+        f = r.get("fields", {})
+        rid = f.get("roomid", "_no_room")
+        if rid not in rooms:
+            rooms[rid] = []
+        rooms[rid].append(f)
+
+    # Build room summaries
+    room_summaries = []
+    for rid, msgs in sorted(rooms.items(), key=lambda x: -len(x[1])):
+        msgs.sort(key=lambda m: (m.get("msgtime") or "", m.get("seq") or 0))
+
+        # Detect threads: gap > 1 hour = new thread
+        threads = []
+        current = []
+        for m in msgs:
+            if m.get("msgtype") != "text":
+                continue  # only thread text messages
+            if current:
+                last_t = _parse_time(current[-1].get("msgtime", ""))
+                this_t = _parse_time(m.get("msgtime", ""))
+                if last_t and this_t and (this_t - last_t).total_seconds() > 10800:  # 3 hour gap = new thread
+                    if len(current) >= 3:
+                        threads.append(current)
+                    current = []
+            current.append(m)
+        if len(current) >= 3:
+            threads.append(current)
+
+        # Monthly active users
+        users = Counter(m.get("from_user", "?") for m in msgs)
+        msgtypes = Counter(m.get("msgtype", "?") for m in msgs)
+        dates = [m["msgtime"][:10] for m in msgs if m.get("msgtime")]
+        date_range = f"{min(dates)} ~ {max(dates)}" if dates else "?"
+
+        summary = {
+            "roomid": rid,
+            "total_msgs": len(msgs),
+            "user_count": len(users),
+            "top_users": [{"user": u, "count": c} for u, c in users.most_common(5)],
+            "msgtype_dist": dict(msgtypes.most_common(5)),
+            "date_range": date_range,
+            "thread_count": len(threads),
+            "threads": [],
+        }
+
+        # Summarize each thread
+        for ti, thread in enumerate(threads[:5]):  # top 5 threads
+            participants = list(set(m.get("from_user", "?") for m in thread))
+            t_dates = sorted(set(m.get("msgtime", "")[:10] for m in thread if m.get("msgtime")))
+            # Extract topic: first meaningful message + most frequent keywords
+            topic_msgs = [str(m.get("content", "")) for m in thread if m.get("content")]
+            keywords = _extract_keywords(" ".join(topic_msgs[:10]))
+            first_msg = topic_msgs[0][:100] if topic_msgs else ""
+            summary["threads"].append({
+                "index": ti + 1,
+                "msgs": len(thread),
+                "participants": participants,
+                "dates": t_dates,
+                "keywords": keywords[:8],
+                "first_msg": first_msg,
+                "samples": topic_msgs[:3],
+            })
+
+        room_summaries.append(summary)
+
+    t_entry["rooms"] = room_summaries
+    t_entry["total_rooms"] = len(rooms)
+
+
+def _parse_time(ts: str):
+    """Parse a time string like '2026-05-30' or '2026-05-30T14:00:00'."""
+    if not ts:
+        return None
+    try:
+        from datetime import datetime
+        ts_clean = ts.replace("T", " ")[:19]
+        return datetime.strptime(ts_clean, "%Y-%m-%d %H:%M:%S")
+    except Exception:
+        try:
+            return datetime.strptime(ts[:10], "%Y-%m-%d")
+        except Exception:
+            return None
+
+
+def _extract_keywords(text: str, min_len: int = 2) -> list[str]:
+    """Extract meaningful Chinese keywords from text."""
+    import re
+    # Remove punctuation and numbers
+    text = re.sub(r'[，。！？、；：""''（）\s\d\W]+', ' ', text)
+    words = text.split()
+    # Keep only Chinese words >= min_len chars
+    result = [w for w in words if len(w) >= min_len and re.search(r'[一-鿿]', w)]
+    # Deduplicate preserving order
+    seen = set()
+    unique = []
+    for w in result:
+        if w not in seen:
+            seen.add(w)
+            unique.append(w)
+    return unique
+
+
+def _sniff_sample_rows(client, table_name: str, t_entry: dict):
+    """Fetch sample rows (full records) for structured tables to show data patterns."""
+    try:
+        resp = client.post("/data/records/list", body={
+            "table_name": table_name, "page_size": 5, "current_page": 1,
+        })
+        recs = resp.get("data", {}).get("results", [])
+        if recs:
+            t_entry["sample_rows"] = [
+                {k: str(v)[:100] for k, v in r.get("fields", {}).items()}
+                for r in recs[:3]
+            ]
+    except Exception:
+        pass
+
+
+def _render_chat_table(t: dict, lines: list):
+    """Render a chat-type Base table with room + thread analysis."""
+    rooms = t.get("rooms", [])
+    fields = t.get("fields", [])
+
+    if fields:
+        lines.append("")
+        lines.append("| 字段 | 类型 | 分析 |")
+        lines.append("|------|------|------|")
+        for f in fields:
+            detail = ""
+            if f.get("value_distribution"):
+                top = f["value_distribution"][:5]
+                detail = "枚举: " + ", ".join(f"{v['value']}({v['count']})" for v in top)
+            elif f["type"] == "number":
+                detail = f"{f.get('min','?')}~{f.get('max','?')}, 均{f.get('avg','?')}"
+            lines.append(f"| {f['name']} | {f['type']} | {detail[:120]} |")
+
+    if not rooms:
+        return
+
+    lines.append("")
+    lines.append(f"**{len(rooms)} 个聊天群**:")
+    for room in rooms[:8]:
+        rid_short = room["roomid"][:16] + "..." if len(room.get("roomid", "")) > 16 else room.get("roomid", "")
+        top_users = ", ".join(f"{u['user']}({u['count']})" for u in room.get("top_users", [])[:4])
+        mtypes = ", ".join(f"{k}:{v}" for k, v in list(room.get("msgtype_dist", {}).items())[:4])
+        lines.append(f"- **群 {rid_short}**: {room['total_msgs']}条消息, {room['user_count']}人, {room['date_range']}")
+        lines.append(f"  - 主要用户: {top_users}")
+        lines.append(f"  - 消息类型: {mtypes}")
+        lines.append(f"  - {room.get('thread_count', 0)} 个对话线程")
+
+        for th in room.get("threads", [])[:3]:
+            kw = ", ".join(th.get("keywords", [])[:5])
+            participants = ", ".join(th.get("participants", [])[:5])
+            lines.append(f"  - **线程{th['index']}**: {th['msgs']}条, 参与: {participants}")
+            lines.append(f"    - 关键词: {kw}")
+            lines.append(f"    - 首条: _{th.get('first_msg', '')[:120]}_")
+
+    lines.append("")
+
+
+def _render_structured_table(t: dict, lines: list):
+    """Render a structured (spreadsheet) Base table with field analysis + sample rows."""
+    fields = t.get("fields", [])
+    rows = t.get("sample_rows", [])
+
+    if fields:
+        lines.append("")
+        lines.append("| 字段 | 类型 | 分析 |")
+        lines.append("|------|------|------|")
+        for f in fields:
+            detail = ""
+            if f.get("value_distribution"):
+                top = f["value_distribution"][:5]
+                detail = "枚举: " + ", ".join(f"{v['value']}({v['count']})" for v in top)
+            elif f["type"] == "number":
+                detail = f"范围 {f.get('min','?')}~{f.get('max','?')}, 均 {f.get('avg','?')}"
+            elif f["type"] == "string":
+                detail = f"{f.get('unique_count','?')}个唯一值, 均长{f.get('avg_length','?')}"
+            if f.get("samples"):
+                s = "; ".join(str(x)[:60] for x in f["samples"][:2])
+                detail += f"  | 例: {s}"
+            lines.append(f"| {f['name']} | {f['type']} | {detail[:120]} |")
+
+    if rows:
+        lines.append("")
+        lines.append("**样本数据行**:")
+        for i, row in enumerate(rows[:3], 1):
+            lines.append(f"- 行 {i}:")
+            for k, v in row.items():
+                lines.append(f"  - {k}: {v}")
+        lines.append("")
+
+
 def _build_markdown(km: dict) -> str:
     """Render knowledge map dict as markdown."""
     gen_time = km.get("generated_at", "")
@@ -228,33 +478,18 @@ def _build_markdown(km: dict) -> str:
             )
         lines.append("")
         for t in base_tables:
-            lines.append(f"### {t['table_name']}")
+            tbl_type = t.get("type", "empty")
+            type_label = {"chat": "🗨️ 聊天记录", "structured": "📊 结构化数据", "empty": "📭 空表"}.get(tbl_type, tbl_type)
+            lines.append(f"### {t['table_name']} ({type_label})")
             lines.append(f"- **table_key**: `{t['table_key']}`")
             lines.append(f"- **列数**: {t.get('column_count', 0)}  |  **记录数**: {t.get('record_count', 0)}")
-            fields = t.get("fields", [])
-            if fields:
-                lines.append("")
-                lines.append("| 字段名 | 类型 | 详情 |")
-                lines.append("|--------|------|------|")
-                for f in fields:
-                    detail = ""
-                    if "value_distribution" in f:
-                        top_vals = ", ".join(
-                            f"{v['value']}({v['count']})"
-                            for v in f.get("value_distribution", [])[:5]
-                        )
-                        detail = f"枚举: {top_vals}"
-                    elif f["type"] == "number":
-                        detail = f"范围 {f.get('min','?')}~{f.get('max','?')}, 均 {f.get('avg','?')}"
-                    elif f["type"] == "string":
-                        detail = f"{f.get('unique_count','?')}个唯一值, 均长{f.get('avg_length','?')}"
-                    elif f["type"] == "boolean":
-                        detail = f"true占比 {f.get('true_ratio','?')}"
-                    if f.get("samples"):
-                        s = "; ".join(str(x)[:60] for x in f["samples"][:2])
-                        detail += f"  | 例: {s}"
-                    lines.append(f"| {f['name']} | {f['type']} | {detail[:120]} |")
-            lines.append(f"\n```bash\n# 查询此表\nemoo base record-list --table-name \"{t['table_name']}\" --page-size 20\n# 按时间/类型过滤\nemoo base record-list --table-name \"{t['table_name']}\" -f \"msgtime:gte:2026-06-01,msgtype:eq:text\"\n```")
+
+            if tbl_type == "chat":
+                _render_chat_table(t, lines)
+            elif tbl_type == "structured":
+                _render_structured_table(t, lines)
+
+            lines.append(f"\n```bash\n# 查询此表\nemoo base record-list --table-name \"{t['table_name']}\" --page-size 20\n```")
             lines.append("")
 
     # Search suggestions
