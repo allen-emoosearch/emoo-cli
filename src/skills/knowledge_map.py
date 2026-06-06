@@ -1,4 +1,4 @@
-"""Knowledge map generation: scan all apps + doc groups, sample content titles.
+"""Knowledge map generation: scan all apps + doc groups + Base tables.
 
 Produces two output files in the output directory:
   - emoo_knowledge_map.json  (machine-readable, consumed by intent analysis)
@@ -8,13 +8,13 @@ Produces two output files in the output directory:
 import json
 import os
 import time
+from collections import Counter
 from typing import Optional
 
 
 def _sample_titles(client, ws_app_key: str, doc_group_id: str,
                    group_name: str = "", limit: int = 5) -> list[str]:
     """Sample document titles from a doc group by searching with its group_id."""
-    # Use group name (or first char) as keyword — the API requires non-empty keyword
     kw = group_name[:2] if group_name else "一"
     try:
         resp = client.post("/search", body={
@@ -31,6 +31,130 @@ def _sample_titles(client, ws_app_key: str, doc_group_id: str,
         return [r.get("title", "") for r in results if r.get("title")]
     except Exception:
         return []
+
+
+def _scan_base_tables(client) -> list[dict]:
+    """Scan all Base tables with field-level sniffing.
+
+    For each table: fetch sample records, extract field names/types,
+    enumerate low-cardinality field values, and collect content samples.
+    """
+    tables = []
+    try:
+        tbl_resp = client.get("/data/table", params={"page_size": 100})
+        base_tables = tbl_resp.get("data", {}).get("results", [])
+    except Exception:
+        return tables
+
+    for t in base_tables:
+        tbl_name = t.get("table_name", "")
+        tbl_key = t.get("table_key", "")
+        t_entry = {
+            "table_key": tbl_key,
+            "table_name": tbl_name,
+            "column_count": t.get("column_count", 0),
+            "record_count": t.get("record_count", 0),
+            "fields": [],
+        }
+
+        if tbl_name and tbl_key and t.get("record_count", 0) > 0:
+            _sniff_table(client, tbl_name, t_entry)
+
+        tables.append(t_entry)
+    return tables
+
+
+def _sniff_table(client, table_name: str, t_entry: dict, sample_size: int = 50):
+    """Fetch sample records and analyse field patterns."""
+    all_fields = {}
+    all_records = []
+
+    try:
+        for page in range(1, 6):  # up to 5 pages * 20 = 100 records
+            resp = client.post("/data/records/list", body={
+                "table_name": table_name,
+                "page_size": min(sample_size, 20),
+                "current_page": page,
+            })
+            recs = resp.get("data", {}).get("results", [])
+            if not recs:
+                break
+            all_records.extend(recs)
+            if len(all_records) >= sample_size:
+                break
+    except Exception:
+        pass
+
+    if not all_records:
+        return
+
+    # Collect all field values
+    for r in all_records[:sample_size]:
+        fields = r.get("fields", {})
+        for fname, fval in fields.items():
+            if fname not in all_fields:
+                all_fields[fname] = []
+            all_fields[fname].append(fval)
+
+    # Build field profiles
+    for fname, values in all_fields.items():
+        non_none = [v for v in values if v is not None]
+
+        # Determine type
+        types = {type(v).__name__ for v in non_none}
+        if len(types) == 1:
+            ftype = types.pop()
+        else:
+            ftype = "mixed"
+
+        if not non_none:
+            f_entry = {"name": fname, "type": "unknown", "nullable": True, "samples": []}
+        elif isinstance(non_none[0], list):
+            inner_types = {type(x).__name__ for v in non_none for x in v if x is not None}
+            ftype = f"list[{','.join(inner_types)}]"
+            f_entry = {
+                "name": fname, "type": ftype, "nullable": len(non_none) < len(values),
+                "samples": [str(v)[:80] for v in non_none[:3]],
+            }
+        elif ftype in ("int", "float"):
+            nums = [float(v) for v in non_none]
+            f_entry = {
+                "name": fname, "type": "number",
+                "nullable": len(non_none) < len(values),
+                "samples": non_none[:3],
+                "min": min(nums), "max": max(nums), "avg": round(sum(nums) / len(nums), 2),
+            }
+        elif ftype == "str":
+            n_unique = len(set(non_none))
+            str_lens = [len(str(v)) for v in non_none]
+            f_entry = {
+                "name": fname, "type": "string",
+                "nullable": len(non_none) < len(values),
+                "unique_count": n_unique,
+                "avg_length": round(sum(str_lens) / len(str_lens)),
+                "samples": [str(v)[:120] for v in non_none[:3]],
+            }
+            # Low-cardinality: list value distribution
+            if n_unique <= 30 and n_unique < len(non_none) * 0.8:
+                dist = Counter(str(v) for v in non_none)
+                f_entry["value_distribution"] = [
+                    {"value": k, "count": c} for k, c in dist.most_common(15)
+                ]
+        elif ftype == "bool":
+            true_count = sum(1 for v in non_none if v)
+            f_entry = {
+                "name": fname, "type": "boolean",
+                "nullable": len(non_none) < len(values),
+                "true_ratio": round(true_count / len(non_none), 2),
+            }
+        else:
+            f_entry = {
+                "name": fname, "type": ftype,
+                "nullable": len(non_none) < len(values),
+                "samples": [str(v)[:80] for v in non_none[:3]],
+            }
+
+        t_entry["fields"].append(f_entry)
 
 
 def _build_markdown(km: dict) -> str:
@@ -87,6 +211,52 @@ def _build_markdown(km: dict) -> str:
             lines.append("_无文档组数据_")
         lines.append("")
 
+    # Base tables
+    base_tables = km.get("base_tables", [])
+    if base_tables:
+        lines.append("---")
+        lines.append("")
+        lines.append("## EMOO Base 数据表")
+        lines.append("")
+        lines.append(f"| # | 表名 | table_key | 列数 | 记录数 |")
+        lines.append("|---|------|-----------|------|--------|")
+        for i, t in enumerate(base_tables, 1):
+            key_short = t["table_key"][:14] + "..." if t.get("table_key") else "—"
+            lines.append(
+                f"| {i} | {t['table_name']} | {key_short} | "
+                f"{t.get('column_count', 0)} | {t.get('record_count', 0)} |"
+            )
+        lines.append("")
+        for t in base_tables:
+            lines.append(f"### {t['table_name']}")
+            lines.append(f"- **table_key**: `{t['table_key']}`")
+            lines.append(f"- **列数**: {t.get('column_count', 0)}  |  **记录数**: {t.get('record_count', 0)}")
+            fields = t.get("fields", [])
+            if fields:
+                lines.append("")
+                lines.append("| 字段名 | 类型 | 详情 |")
+                lines.append("|--------|------|------|")
+                for f in fields:
+                    detail = ""
+                    if "value_distribution" in f:
+                        top_vals = ", ".join(
+                            f"{v['value']}({v['count']})"
+                            for v in f.get("value_distribution", [])[:5]
+                        )
+                        detail = f"枚举: {top_vals}"
+                    elif f["type"] == "number":
+                        detail = f"范围 {f.get('min','?')}~{f.get('max','?')}, 均 {f.get('avg','?')}"
+                    elif f["type"] == "string":
+                        detail = f"{f.get('unique_count','?')}个唯一值, 均长{f.get('avg_length','?')}"
+                    elif f["type"] == "boolean":
+                        detail = f"true占比 {f.get('true_ratio','?')}"
+                    if f.get("samples"):
+                        s = "; ".join(str(x)[:60] for x in f["samples"][:2])
+                        detail += f"  | 例: {s}"
+                    lines.append(f"| {f['name']} | {f['type']} | {detail[:120]} |")
+            lines.append(f"\n```bash\n# 查询此表\nemoo base record-list --table-name \"{t['table_name']}\" --page-size 20\n# 按时间/类型过滤\nemoo base record-list --table-name \"{t['table_name']}\" -f \"msgtime:gte:2026-06-01,msgtype:eq:text\"\n```")
+            lines.append("")
+
     # Search suggestions
     lines.append("---")
     lines.append("")
@@ -125,7 +295,19 @@ def generate_knowledge_map(
     km = {
         "generated_at": time.strftime("%Y-%m-%d %H:%M:%S"),
         "apps": [],
+        "base_tables": [],
     }
+
+    # Step 0: scan Base tables
+    try:
+        print("正在扫描 Base 数据表...")
+        base_tables = _scan_base_tables(client)
+        km["base_tables"] = base_tables
+        if base_tables:
+            total_recs = sum(t.get("record_count", 0) for t in base_tables)
+            print(f"  Base 表: {len(base_tables)} 个, 共 {total_recs} 条记录")
+    except Exception:
+        pass
 
     # Step 1: list all apps
     resp = client.get("/apps")
