@@ -29,6 +29,7 @@ def _default_km_path() -> str:
 
 
 from ..skills import generate_knowledge_map, analyze_intent, execute_search_plan
+from ..skills.analyze import run_analyze
 from ..skills.search import export_results_csv
 from ..skills.loader import (
     load_all_skills, find_skill, validate_params, SKILLS_DIR,
@@ -676,3 +677,63 @@ def search(ctx, plan_file, step, max_per_step, csv_path):
     if csv_path:
         path = export_results_csv(outcome, csv_path)
         _progress(f"CSV 已导出: {path}")
+
+
+@pipeline.command()
+@click.argument("query")
+@click.option("-k", "--knowledge-map", "km_path", default=None,
+              help="知识图谱路径 (默认自动查找缓存)")
+@click.option("--max-results", default=500, help="最多返回结果数 (默认500)")
+@click.option("--json-output", "as_json", is_flag=True, default=False, help="JSON输出")
+@click.pass_context
+def analyze(ctx, query, km_path, max_results, as_json):
+    """智能分析: KM匹配群 → 定向搜索 → 多群聚合.
+
+    \b
+    QUERY: 自然语言查询，如 "最近一周发货情况"
+    自动: 解析时间 → 匹配聊天群 → 搜索 → 去重聚合
+
+    \b
+    示例:
+      emoo skill pipeline analyze "最近一周发货情况"
+      emoo skill pipeline analyze "今天裹包运输" --max-results 200
+    """
+    client = EmooClient(base_url=ctx.obj.get("base_url"), user_id=ctx.obj.get("user_id"))
+
+    if km_path is None:
+        default_km = _default_km_path()
+        if os.path.exists(default_km):
+            km_path = default_km
+
+    _progress(f"🧠 智能分析: {query}")
+
+    result = run_analyze(client, query, km_path=km_path)
+
+    if as_json:
+        click.echo(json.dumps(result, ensure_ascii=False, indent=2))
+    else:
+        _progress(f"\n{'='*60}")
+        _progress(f"📊 分析结果: {result['query']}")
+        _progress(f"   时间: {result['time_range'][0]} ~ {result['time_range'][1]}")
+        _progress(f"   匹配群: {len(result.get('matched_rooms', []))} 个")
+        if result.get('matched_rooms'):
+            for r in result['matched_rooms']:
+                _progress(f"     - {r['roomid'][:24]}... (相关词: {', '.join(r['matched_keywords'])})")
+        _progress(f"   结果: {result['total']} 条")
+
+        if result.get('by_date'):
+            _progress(f"\n   每日分布:")
+            for d, c in result['by_date'].items():
+                bar = "█" * min(c, 30)
+                _progress(f"     {d}: {bar} {c}")
+
+        if result.get('top_people'):
+            _progress(f"\n   关键人物:")
+            for p in result['top_people'][:5]:
+                _progress(f"     {p['user']}: {p['count']}条")
+
+        if result.get('samples'):
+            _progress(f"\n   样本消息:")
+            for s in result['samples'][:8]:
+                _progress(f"     [{s['time']}] {s['user']}: {s['content'][:120]}")
+                _progress(f"      📍 {s['room']}...")

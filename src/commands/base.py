@@ -190,10 +190,11 @@ def _apply_contains_filter(results: list, field: str, value: str) -> list:
 @click.option("--current-page", default=1, help="页码")
 @click.option("--filter", "-f", "filters", default=None,
               help="过滤条件, 逗号分隔 (eq/neq/gte/lte/in/nin/contains, 如 content:contains:发货,msgtime:gte:2026-06-01)")
+@click.option("--room-id", default=None, help="按聊天群ID过滤 (客户端过滤，支持多个逗号分隔)")
 @click.option("--sort", default=None, help="排序 (如 created_at:desc)")
 @click.option("--max-results", type=int, default=None, help="最多返回条数，自动翻页")
 @click.pass_context
-def record_list(ctx, table_key, table_name, page_size, current_page, filters, sort, max_results):
+def record_list(ctx, table_key, table_name, page_size, current_page, filters, sort, max_results, room_id):
     """查询记录列表。支持 contains 模糊搜索 (客户端过滤，大小写不敏感)。"""
     _ensure_table(table_key, table_name)
     if page_size > 100:
@@ -225,7 +226,10 @@ def record_list(ctx, table_key, table_name, page_size, current_page, filters, so
 
     client = EmooClient(base_url=ctx.obj.get("base_url"), user_id=ctx.obj.get("user_id"))
 
-    if contains_filters:
+    # Parse room filter
+    room_ids = [r.strip() for r in room_id.split(",")] if room_id else []
+
+    if contains_filters or room_ids:
         # Fetch more records at once for client-side filtering
         all_results = []
         limit = max_results or 5000
@@ -236,6 +240,10 @@ def record_list(ctx, table_key, table_name, page_size, current_page, filters, so
             results = resp.get("data", {}).get("results", [])
             if not results:
                 break
+
+            # Apply room filter (client-side)
+            if room_ids:
+                results = [r for r in results if r.get("fields", {}).get("roomid") in room_ids]
 
             # Apply contains filters
             for field, value in contains_filters:
