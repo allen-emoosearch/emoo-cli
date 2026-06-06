@@ -1,11 +1,17 @@
 """EMOO Base commands: CRUD operations on data table records."""
 
 import json
+import sys
 
 import click
 
 from ..client import EmooClient
 from ..formatters import success, output
+
+
+def _progress(msg: str, **kwargs) -> None:
+    """Write progress/info to stderr so stdout stays clean."""
+    click.echo(msg, err=True, **kwargs)
 
 
 def _parse_records(value):
@@ -156,32 +162,112 @@ def record_delete(ctx, table_key, table_name, record_keys, record_titles):
     success(resp, as_json=ctx.obj.get("as_json", False))
 
 
+def _parse_filter_clause(raw: str) -> tuple:
+    """Parse a filter like 'field:op:value' → (field, op, value).
+    Supports: eq, neq, gte, lte, in, nin, contains (client-side).
+    """
+    parts = raw.split(":", 2)
+    if len(parts) == 3:
+        return parts[0].strip(), parts[1].strip(), parts[2].strip()
+    raise click.BadParameter(f"过滤格式错误，应为 field:op:value，当前: {raw}")
+
+
+def _apply_contains_filter(results: list, field: str, value: str) -> list:
+    """Client-side contains filter (case-insensitive)."""
+    v_lower = value.lower()
+    filtered = []
+    for r in results:
+        fval = str(r.get("fields", {}).get(field, "")).lower()
+        if v_lower in fval:
+            filtered.append(r)
+    return filtered
+
+
 @base.command()
 @click.option("--table-key", default=None, help="表的系统标识 (与 --table-name 二选一)")
 @click.option("--table-name", default=None, help="表的显示名称 (与 --table-key 二选一)")
 @click.option("--page-size", default=20, help="每页数量 (最大100)")
 @click.option("--current-page", default=1, help="页码")
-@click.option("--filter", "-f", "filters", default=None, help="过滤条件, 逗号分隔 (如 status:eq:active,score:gte:60)")
+@click.option("--filter", "-f", "filters", default=None,
+              help="过滤条件, 逗号分隔 (eq/neq/gte/lte/in/nin/contains, 如 content:contains:发货,msgtime:gte:2026-06-01)")
 @click.option("--sort", default=None, help="排序 (如 created_at:desc)")
+@click.option("--max-results", type=int, default=None, help="最多返回条数，自动翻页")
 @click.pass_context
-def record_list(ctx, table_key, table_name, page_size, current_page, filters, sort):
-    """查询记录列表。"""
+def record_list(ctx, table_key, table_name, page_size, current_page, filters, sort, max_results):
+    """查询记录列表。支持 contains 模糊搜索 (客户端过滤，大小写不敏感)。"""
     _ensure_table(table_key, table_name)
     if page_size > 100:
         raise click.BadParameter(f"page-size 最大 100，当前为 {page_size}")
 
-    body = {"page_size": page_size, "current_page": current_page}
+    # Separate API filters from client-side contains filters
+    api_filters = []
+    contains_filters = []
+    if filters:
+        for f in filters.split(","):
+            f = f.strip()
+            if not f:
+                continue
+            field, op, value = _parse_filter_clause(f)
+            if op == "contains":
+                contains_filters.append((field, value))
+            else:
+                api_filters.append(f)
+
+    body = {"page_size": 100 if contains_filters else page_size, "current_page": 1}
     if table_key:
         body["table_key"] = table_key
     else:
         body["table_name"] = table_name
-    if filters:
-        body["filters"] = [f.strip() for f in filters.split(",")]
+    if api_filters:
+        body["filters"] = api_filters
     if sort:
         body["sort"] = sort
 
     client = EmooClient(base_url=ctx.obj.get("base_url"), user_id=ctx.obj.get("user_id"))
-    resp = client.post("/data/records/list", body=body)
+
+    if contains_filters:
+        # Fetch more records at once for client-side filtering
+        all_results = []
+        limit = max_results or 5000
+        page = 1
+        while True:
+            body["current_page"] = page
+            resp = client.post("/data/records/list", body=body)
+            results = resp.get("data", {}).get("results", [])
+            if not results:
+                break
+
+            # Apply contains filters
+            for field, value in contains_filters:
+                results = _apply_contains_filter(results, field, value)
+
+            all_results.extend(results)
+            _progress(f"  已获取 {len(all_results)} 条 (第 {page} 页)")
+
+            if len(all_results) >= limit:
+                all_results = all_results[:limit]
+                break
+            if len(results) < body["page_size"]:
+                break
+            page += 1
+
+        # Apply pagination for display
+        start = (current_page - 1) * page_size
+        end = start + page_size
+        paginated = all_results[start:end]
+        total = len(all_results)
+
+        resp["data"]["results"] = paginated
+        resp["data"]["total"] = total
+        resp["data"]["page_size"] = page_size
+        resp["data"]["current_page"] = current_page
+        if max_results and total >= max_results and len(all_results) < total:
+            resp["data"]["_truncated"] = True
+    else:
+        body["page_size"] = page_size
+        body["current_page"] = current_page
+        resp = client.post("/data/records/list", body=body)
+
     output(resp, as_json=ctx.obj.get("as_json", False))
 
 
