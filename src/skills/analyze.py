@@ -353,33 +353,50 @@ def run_analyze(client, query: str, km_path: Optional[str] = None,
         reason_str = "; ".join(reasons[:2]) if reasons else f'匹配词: {room.get("matched_keywords", [])}'
         _log(f"   🔍 [{tbl_name}] {gid[:24]}... {reason_str}")
 
-        page = 1
         room_results = []
         api_filters = [f"{time_field}:gte:{start}", f"{time_field}:lte:{end}"]
         if group_field and gid:
             api_filters.append(f"{group_field}:eq:{gid}")
 
+        def _fetch_page(p):
+            """Fetch a single page, returns (page_num, records)."""
+            resp = client.post("/data/records/list", body={
+                "table_name": tbl_name, "page_size": 100,
+                "current_page": p, "filters": api_filters,
+            })
+            recs = resp.get("data", {}).get("results", [])
+            matched = []
+            for r in recs:
+                if exclude_probe and _is_probe(r):
+                    continue
+                content = str(r["fields"].get(tbl.get("content_field", "content"), ""))
+                if any(kw in content for kw in keywords):
+                    r["_group_field"] = group_field
+                    r["_group_id"] = gid
+                    r["_table"] = tbl_name
+                    matched.append(r)
+            return p, matched
+
         try:
-            while True:  # paginate until exhaustion
-                resp = client.post("/data/records/list", body={
-                    "table_name": tbl_name, "page_size": 100,
-                    "current_page": page, "filters": api_filters,
-                })
-                recs = resp.get("data", {}).get("results", [])
-                if not recs:
-                    break
-                if page % 5 == 1:
-                    _log(f"      ⏳ {gid[:20]}... 第{page}页, 已匹配{len(room_results)}条")
-                for r in recs:
-                    if exclude_probe and _is_probe(r):
-                        continue
-                    content = str(r["fields"].get(tbl.get("content_field", "content"), ""))
-                    if any(kw in content for kw in keywords):
-                        r["_group_field"] = group_field
-                        r["_group_id"] = gid
-                        r["_table"] = tbl_name
-                        room_results.append(r)
-                page += 1
+            # Page 1: get total for batching
+            _, first_batch = _fetch_page(1)
+            room_results.extend(first_batch)
+            total_pages = 1
+            # Re-fetch page 1 to get total, or use a smaller probe
+            probe = client.post("/data/records/list", body={
+                "table_name": tbl_name, "page_size": 1,
+                "current_page": 1, "filters": api_filters,
+            })
+            total = probe.get("data", {}).get("total", 0)
+            total_pages = (total + 99) // 100  # ceil division
+
+            if total_pages > 1:
+                _log(f"      📖 {gid[:20]}... {total}条 → {total_pages}页, 并发拉取中...")
+                with ThreadPoolExecutor(max_workers=5) as pool:
+                    futures = {pool.submit(_fetch_page, p): p for p in range(2, total_pages + 1)}
+                    for future in as_completed(futures):
+                        p, batch = future.result()
+                        room_results.extend(batch)
         except Exception as e:
             _log(f"      ⚠️ [{gid[:20]}] 出错: {e}")
 
