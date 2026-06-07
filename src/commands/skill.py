@@ -37,7 +37,6 @@ from ..skills.loader import (
 from ..skills.runner import run_skill, export_skill_csv
 from ..skills.registry import (
     ensure_skills_dir, register_symlink, is_registered, unregister,
-    copy_example_skills,
 )
 
 
@@ -92,22 +91,16 @@ def skill():
 def init(no_register):
     """初始化 skills 目录并注册到 Claude Code.
 
-    创建 ~/.emoo/skills/ 目录（如不存在），并建立 symlink:
-      ~/.claude/skills/emoo/ → ~/.emoo/skills/
+    创建当前工作区专属 skills 目录: ~/.emoo/skills/<workspace>/
+    建立 symlink: ~/.claude/skills/emoo/ → ~/.emoo/skills/<workspace>/
 
-    注册后，Claude Code 即可加载所有 emoo skill 文件。
+    注册后，Claude Code 即可加载当前工作区的 emoo skill 文件。
+    \b
+    提示: 使用 emoo skill create <name> 创建新 skill。
     """
     skills_dir = ensure_skills_dir()
     click.echo(f"Skills 目录: {skills_dir}")
-
-    # Copy example skills from package
-    copied = copy_example_skills()
-    if copied:
-        click.echo(f"\n已安装 {len(copied)} 个示例 skill:")
-        for f in copied:
-            click.echo(f"  • {os.path.basename(f)}")
-    else:
-        click.echo("\n(示例 skill 已存在，跳过)")
+    click.echo("使用 emoo skill create <name> 创建 skill")
 
     if no_register:
         click.echo("\n已跳过 Claude Code 注册 (--no-register)")
