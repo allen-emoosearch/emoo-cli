@@ -19,7 +19,7 @@ emoo:
 
 ## 核心原则
 
-**KM 驱动，不要裸搜。** 任何搜索前先确保知识图谱缓存有效 (24h)。
+**KM 驱动，不要裸搜。** 任何搜索前先确保知识图谱缓存有效 (7d)。
 ⚠️ **`analyze` 不是万能的 — 只处理聊天/群消息。文档和表格用对应命令。**
 
 ---
@@ -29,7 +29,7 @@ emoo:
 ```bash
 emoo auth login --api-key <key>                    # 登录
 emoo skill init                                     # 创建目录 + 注册 symlink + 安装本指南
-emoo skill pipeline knowledge-map --auto --ttl 24h  # 生成知识图谱 (必须！)
+emoo skill pipeline knowledge-map --auto --ttl 7d  # 生成知识图谱 (必须！)
 ```
 
 ---
@@ -60,7 +60,7 @@ emoo skill pipeline knowledge-map --auto --ttl 24h  # 生成知识图谱 (必须
   │     无500硬上限，--stream 流式输出
   │
   └─ 不确定？
-     → 先: emoo skill pipeline knowledge-map --auto --ttl 24h  ← KM 告诉你一切
+     → 先: emoo skill pipeline knowledge-map --auto --ttl 7d  ← KM 告诉你一切
 ```
 
 ## 三、各命令详解
