@@ -226,46 +226,54 @@ def record_list(ctx, table_key, table_name, page_size, current_page, filters, so
     room_ids = [r.strip() for r in room_id.split(",")] if room_id else []
 
     if contains_filters or room_ids:
-        # Fetch more records at once for client-side filtering
-        all_results = []
+        # Fetch ALL source pages, then filter, then paginate for display
+        all_matched = []
         limit = max_results or 5000
+        source_total = 0
+        source_pages = 0
         page = 1
         while True:
             body["current_page"] = page
             resp = client.post("/data/records/list", body=body)
-            results = resp.get("data", {}).get("results", [])
-            if not results:
+            raw_results = resp.get("data", {}).get("results", [])
+            if not raw_results:
                 break
+            source_total += len(raw_results)
+            source_pages += 1
 
             # Apply room filter (client-side)
+            filtered = list(raw_results)
             if room_ids:
-                results = [r for r in results if r.get("fields", {}).get(group_field) in room_ids]
+                filtered = [r for r in filtered if r.get("fields", {}).get(group_field) in room_ids]
 
             # Apply contains filters
             for field, value in contains_filters:
-                results = _apply_contains_filter(results, field, value)
+                filtered = _apply_contains_filter(filtered, field, value)
 
-            all_results.extend(results)
-            _progress(f"  已获取 {len(all_results)} 条 (第 {page} 页)")
+            all_matched.extend(filtered)
+            _progress(f"  已翻 {source_pages} 页, 源数据 {source_total} 条, 匹配 {len(all_matched)} 条")
 
-            if len(all_results) >= limit:
-                all_results = all_results[:limit]
+            if len(all_matched) >= limit:
+                all_matched = all_matched[:limit]
                 break
-            if len(results) < body["page_size"]:
+            # Stop when source pages exhausted (not filtered results)
+            if len(raw_results) < body["page_size"]:
                 break
             page += 1
 
-        # Apply pagination for display
+        # Apply display pagination
+        total_matched = len(all_matched)
         start = (current_page - 1) * page_size
         end = start + page_size
-        paginated = all_results[start:end]
-        total = len(all_results)
+        paginated = all_matched[start:end]
 
         resp["data"]["results"] = paginated
-        resp["data"]["total"] = total
+        resp["data"]["total"] = total_matched
         resp["data"]["page_size"] = page_size
         resp["data"]["current_page"] = current_page
-        if max_results and total >= max_results and len(all_results) < total:
+        resp["data"]["_source_total"] = source_total
+        resp["data"]["_source_pages"] = source_pages
+        if limit and total_matched >= limit:
             resp["data"]["_truncated"] = True
     else:
         body["page_size"] = page_size
