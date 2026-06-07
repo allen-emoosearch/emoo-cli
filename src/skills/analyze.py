@@ -292,34 +292,11 @@ def _stratified_sample(records: list, max_total: int = 200) -> list:
     return sorted(result, key=lambda r: (r.get("fields", {}).get("msgtime", ""), r.get("fields", {}).get("seq", 0)))
 
 
-# ── AI Summarization ─────────────────────────────────────────────────
-
-def _summarize_with_ai(client, query: str, records: list, max_chars: int = 16000) -> str:
-    """Send full room data to AI for summarization."""
-    # Build a compact text representation
-    lines = []
-    for r in records[:500]:  # max 500 messages
-        f = r.get("fields", {})
-        t = f.get("msgtime", "") or f.get("time", "")
-        u = f.get("from_user", "") or f.get("user", "")
-        c = str(f.get("content", "") or "")[:300]
-        lines.append(f"[{t}] {u}: {c}")
-    text = "\n".join(lines)[:max_chars]
-
-    prompt = f'用户查询: {query}\n\n以下是群聊记录(按时间排序):\n\n{text}\n\n请用中文总结: 1)核心事件 2)关键人物 3)时间线 4)问题/风险。控制在300字以内。'
-    try:
-        resp = client.post("/chat/messages", body={"query": prompt, "stream": False})
-        return resp.get("data", {}).get("complete_response", "")
-    except Exception:
-        return ""
-
-
 # ── Main pipeline ────────────────────────────────────────────────────
 
 def run_analyze(client, query: str, km_path: Optional[str] = None,
                 compact: bool = False, exclude_probe: bool = True,
-                max_results: int = 500, session_id: str = None,
-                summarize: bool = False) -> dict:
+                max_results: int = 500, session_id: str = None) -> dict:
     """Execute the full intelligent analysis pipeline."""
 
     # 1. Load KM
@@ -520,10 +497,9 @@ def run_analyze(client, query: str, km_path: Optional[str] = None,
     by_date_full = Counter(r["fields"].get(time_field, "")[:10] for r in all_results)
     daily_summary = dict(by_date_full.most_common())
 
-    # Stratified sampling for display (skip for summarize — keep all)
+    # Stratified sampling for display
     sampling = "full"
-    results_for_summary = all_results  # keep full copy for AI
-    if len(all_results) > 200 and not summarize:
+    if len(all_results) > 200:
         all_results = _stratified_sample(all_results, 200)
         sampling = "stratified_by_day"
 
@@ -531,22 +507,8 @@ def run_analyze(client, query: str, km_path: Optional[str] = None,
     people = Counter(r["fields"].get(user_field, "?") for r in all_results)
     dates = Counter(r["fields"].get(time_field, "")[:10] for r in all_results)
 
-    # AI Summarization — uses full data, not sampled
-    ai_summary = ""
-    ai_source_count = 0
-    ai_truncated = False
-    if summarize and results_for_summary:
-        ai_source_count = len(results_for_summary)
-        ai_truncated = ai_source_count > 300
-        _log(f"\n   🤖 AI 总结中 (基于全部 {ai_source_count} 条消息)...")
-        ai_summary = _summarize_with_ai(client, query, results_for_summary)
-        _log(f"   ✅ 总结完成")
-
     return {
         "query": query, "keywords": keywords, "time_range": [start, end],
-        "ai_summary": ai_summary,
-        "ai_summary_source_count": ai_source_count,
-        "ai_summary_truncated": ai_truncated,
         "matched_rooms": [{"group_id": r["group_id"], "name": room_names.get(r["group_id"], ""),
                            "score": r["score"],
                            "matched_keywords": r["matched_keywords"],

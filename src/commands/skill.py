@@ -699,9 +699,8 @@ def search(ctx, plan_file, step, max_per_step, csv_path):
 @click.option("--max-results", default=500, help="最多返回结果数 (默认500)")
 @click.option("--compact", is_flag=True, default=False, help="精简输出 (仅保留 time/from/content/group)")
 @click.option("--no-probe-filter", is_flag=True, default=False, help="不过滤探针数据")
-@click.option("--summarize", is_flag=True, default=False, help="AI自动总结 (拉全量无关键词过滤, 送模型总结)")
 @click.pass_context
-def analyze(ctx, query, km_path, max_results, compact, no_probe_filter, summarize):
+def analyze(ctx, query, km_path, max_results, compact, no_probe_filter):
     """智能分析: KM匹配群 → 定向搜索 → 多群聚合.
 
     \b
@@ -724,8 +723,7 @@ def analyze(ctx, query, km_path, max_results, compact, no_probe_filter, summariz
     _progress(f"🧠 智能分析: {query}")
 
     result = run_analyze(client, query, km_path=km_path, compact=compact,
-                         exclude_probe=not no_probe_filter, max_results=max_results,
-                         summarize=summarize)
+                         exclude_probe=not no_probe_filter, max_results=max_results)
 
     if as_json:
         click.echo(json.dumps(result, ensure_ascii=False, indent=2))
@@ -762,13 +760,6 @@ def analyze(ctx, query, km_path, max_results, compact, no_probe_filter, summariz
             lines.append(f"\n   关键人物:")
             for p in result.get('top_people', [])[:5]:
                 lines.append(f"     {p['user']}: {p['count']}条")
-
-        if result.get('ai_summary'):
-            src = result.get('ai_summary_source_count', 0)
-            trunc = ' (已截断)' if result.get('ai_summary_truncated') else ''
-            lines.append(f"\n   🤖 AI总结 (基于{src}条消息{trunc}):")
-            for line in result['ai_summary'].split('\n'):
-                lines.append(f"     {line}")
 
         if result.get('samples'):
             lines.append(f"\n   样本消息:")
