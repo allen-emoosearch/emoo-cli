@@ -96,3 +96,90 @@ def clear_cache():
     from ..client import clear_cache as _clear_cache
     _clear_cache()
     click.echo("请求缓存已清除")
+
+
+@auth.command(name="switch")
+@click.argument("name", required=False)
+@click.option("--save", "save_as", default=None, help="将当前配置另存为指定名称")
+@click.option("--list", "list_only", is_flag=True, default=False, help="列出所有可用配置")
+def switch(name, save_as, list_only):
+    """切换/管理多工作区配置文件。
+
+    \b
+    不带参数: 列出所有可用配置
+    --save <name>: 将当前激活的 config.json 另存为 config.<name>.json
+    <name>: 切换至 config.<name>.json (复制为 config.json)
+
+    \b
+    示例:
+      emoo auth switch              # 列出所有配置
+      emoo auth switch fengkai      # 切换至 config.fengkai.json
+      emoo auth switch qingliu      # 切换至 config.qingliu.json
+      emoo auth switch --save 930   # 保存当前配置为 config.930.json
+    """
+    import os
+    import shutil
+
+    config_dir = os.path.expanduser("~/.emoo")
+    active = os.path.join(config_dir, "config.json")
+
+    # --save: backup current
+    if save_as:
+        if not os.path.exists(active):
+            click.echo("当前无激活的配置文件", err=True)
+            return
+        dest = os.path.join(config_dir, f"config.{save_as}.json")
+        shutil.copy2(active, dest)
+        click.echo(f"已保存: config.{save_as}.json")
+        return
+
+    # List or switch
+    configs = []
+    for f in sorted(os.listdir(config_dir)):
+        if f.startswith("config.") and f.endswith(".json"):
+            name_part = f[7:-5]  # extract "xxx" from "config.xxx.json"
+            if name_part:
+                configs.append(name_part)
+
+    # --list or no args: show all
+    if list_only or not name:
+        if not configs:
+            click.echo("无已保存的配置")
+            return
+
+        # Show current active (compare by file content hash)
+        current_hash = ""
+        try:
+            from hashlib import md5
+            with open(active, "rb") as f:
+                current_hash = md5(f.read()).hexdigest()
+        except Exception:
+            pass
+
+        click.echo("可用配置:")
+        for c in sorted(configs):
+            cfg_path = os.path.join(config_dir, f"config.{c}.json")
+            cfg_key = ""
+            cfg_hash = ""
+            try:
+                with open(cfg_path, "rb") as f:
+                    cfg_hash = md5(f.read()).hexdigest()  # noqa: F821
+                with open(cfg_path) as f:
+                    cfg_data = json.load(f)  # noqa: F821
+                cfg_key = (cfg_data.get("api_key") or cfg_data.get("client_id", ""))[:16]
+            except Exception:
+                pass
+            marker = " ← 当前" if cfg_hash == current_hash else ""
+            label = f"{c} ({cfg_key}...)" if cfg_key else c
+            click.echo(f"  {label}{marker}")
+        return
+
+    # Switch
+    src = os.path.join(config_dir, f"config.{name}.json")
+    if not os.path.exists(src):
+        click.echo(f"配置不存在: config.{name}.json", err=True)
+        click.echo(f"可用: {', '.join(configs)}", err=True)
+        return
+
+    shutil.copy2(src, active)
+    click.echo(f"已切换至: {name}")
