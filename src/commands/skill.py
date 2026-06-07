@@ -114,6 +114,7 @@ def init(no_register):
 
     click.echo("\n使用 emoo skill list 查看所有 skill")
     click.echo("使用 emoo skill run <name> 执行 skill")
+    click.echo("\n💡 下一步: emoo skill pipeline knowledge-map  (生成知识图谱，后续搜索的基石)")
 
 
 # ── register ────────────────────────────────────────────────────────────────

@@ -12,6 +12,22 @@ installed `emoo` command will still run the stale code.
 - Two auth modes: API Key (recommended, no `--user-id` needed) or OAuth2 (needs `--user-id`)
 - All commands auto-refresh OAuth2 tokens 60s before expiry
 
+## Search Strategy (ALWAYS follow this order)
+
+When a user asks a question, start from the knowledge map — never default to `emoo data search`:
+
+1. **Check/Generate KM**: `emoo skill pipeline knowledge-map --auto --ttl 24h` (cached, instant if fresh)
+2. **For chat/group conversations**: `emoo skill pipeline analyze "<query>"` — KM matches rooms → searches with time+keyword → aggregates
+3. **For structured documents**: `emoo data search -k "<keyword>" -f '<filter>'` — use app filter from KM
+4. **For Base table data**: `emoo base record-list --table-name "<name>" -f "..."` — use table names from KM
+
+The KM tells you:
+- What apps/documents exist (for data search)
+- What chat rooms exist and their topics (for analyze)
+- What Base tables exist and their fields (for record-list)
+
+**IMPORTANT**: `emoo skill pipeline analyze` handles chat queries end-to-end. It auto-discovers chat tables, time ranges, and aggregates across rooms. Use it for any question about conversations/group chats.
+
 ## Quick reference
 
 ```
