@@ -737,4 +737,5 @@ def analyze(ctx, query, km_path, max_results, as_json):
             _progress(f"\n   样本消息:")
             for s in result['samples'][:8]:
                 _progress(f"     [{s['time']}] {s['user']}: {s['content'][:120]}")
-                _progress(f"      📍 {s['room']}...")
+                g = s.get('group', s.get('room', '?'))
+                _progress(f"      📍 {g}...")
