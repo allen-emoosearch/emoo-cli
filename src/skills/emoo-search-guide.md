@@ -12,7 +12,7 @@ emoo:
     query:
       description: 搜索关键词
       required: true
-      example: 发货
+      example: 搜索关键词
 ---
 
 # EMOO 搜索指南 v2
@@ -44,8 +44,8 @@ emoo skill pipeline knowledge-map --auto --ttl 24h  # 生成知识图谱 (必须
   ├─ 是聊天/群消息？ ← 🗨️ analyze
   │   → emoo skill pipeline analyze "<自然语言查询>"
   │     原理: KM匹配群 → API 时间+群过滤 → 客户端关键词 → 去重聚合
-  │     示例: "近一周发货" / "报销" / "机器故障"
-  │     ⚠️ 前提: KM里必须有 type=chat 的 Base 表(如企微存档)
+  │     示例: "近一周群内消息" / "本月有哪些讨论"
+  │     ⚠️ 前提: KM里必须有 type=chat 的 Base 表(聊天记录表)
   │
   ├─ 是文档/知识库？ ← 📄 data search
   │   → emoo data search -k "<keyword>" -f '<filter>'
