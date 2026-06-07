@@ -8,7 +8,7 @@ from typing import Optional
 import requests
 
 from . import config
-from .errors import AuthError, from_api_response, EmooError
+from .errors import AuthError, ServerError, from_api_response, EmooError
 
 # Global cache shared across all client instances
 _cache: dict[str, tuple[float, dict]] = {}
@@ -89,7 +89,13 @@ class EmooClient:
 
     def _check_response(self, resp: requests.Response) -> dict:
         """Check API response and return body or raise structured error."""
-        body = resp.json()
+        try:
+            body = resp.json()
+        except Exception:
+            raise ServerError(
+                resp.status_code,
+                f"API 返回非 JSON 响应 (HTTP {resp.status_code})",
+            )
         code = body.get("code")
         if code is not None and code != 200:
             raise from_api_response(

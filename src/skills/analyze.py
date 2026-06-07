@@ -48,8 +48,12 @@ def _parse_time_expression(query: str) -> tuple:
 
 def _extract_search_keywords(query: str) -> list[str]:
     """Extract meaningful search keywords from the query, excluding time words."""
-    # Remove time expressions (order matters: longer patterns first)
-    cleaned = re.sub(r'最近[一1][周月]|最近\d*天|近[一1]?[周月个]|本周|本月|今天|昨天|最近', '', query)
+    # Remove time expressions (longest patterns first!)
+    cleaned = re.sub(
+        r'最近[一1]个[周月]|最近[一1][周月]|最近\d+天|'
+        r'近[一1]个[周月]|近[一1][周月]|近\d+天|'
+        r'本周|本月|今天|昨天|最近',
+        '', query)
     # Remove common filler
     cleaned = re.sub(r'的|情况|一下|帮我|查|看|分析', '', cleaned)
     # Extract Chinese words >= 2 chars
@@ -286,30 +290,35 @@ def run_analyze(client, query: str, km_path: Optional[str] = None) -> dict:
         if group_field and gid:
             api_filters.append(f"{group_field}:eq:{gid}")
 
-        while page <= 3:  # max 3 pages per room for speed
-            resp = client.post("/data/records/list", body={
-                "table_name": tbl_name,
-                "page_size": 100,
-                "current_page": page,
-                "filters": api_filters,
-            })
-            data = resp.get("data", {})
-            recs = data.get("results", [])
-            if not recs:
-                break
+        # Limit pages for long time ranges (>7 days: 1 page, <=7: 3 pages)
+        max_pages = 1 if (datetime.strptime(end, "%Y-%m-%d") - datetime.strptime(start, "%Y-%m-%d")).days > 7 else 3
+        try:
+            while page <= max_pages:
+                resp = client.post("/data/records/list", body={
+                    "table_name": tbl_name,
+                    "page_size": 100,
+                    "current_page": page,
+                    "filters": api_filters,
+                })
+                data = resp.get("data", {})
+                recs = data.get("results", [])
+                if not recs:
+                    break
 
-            # Keyword filter (client-side)
-            for r in recs:
-                content = str(r["fields"].get(tbl.get("content_field", "content"), ""))
-                if any(kw in content for kw in keywords):
-                    r["_group_field"] = group_field
-                    r["_group_id"] = gid
-                    r["_table"] = tbl_name
-                    room_results.append(r)
+                # Keyword filter (client-side)
+                for r in recs:
+                    content = str(r["fields"].get(tbl.get("content_field", "content"), ""))
+                    if any(kw in content for kw in keywords):
+                        r["_group_field"] = group_field
+                        r["_group_id"] = gid
+                        r["_table"] = tbl_name
+                        room_results.append(r)
 
-            page += 1
-            if len(room_results) >= 200:
-                break
+                page += 1
+                if len(room_results) >= 200:
+                    break
+        except Exception as e:
+            print(f"      ⚠️ 搜索出错: {e}, 跳过此群")
 
         # Dedup by content
         seen = set()
