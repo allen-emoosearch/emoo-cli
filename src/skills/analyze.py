@@ -101,6 +101,54 @@ def _parse_time_expression(query: str, client=None) -> tuple:
     return (datetime.now() - timedelta(days=7)).strftime("%Y-%m-%d"), today
 
 
+def _expand_keywords_with_ai(client, keywords: list[str], km: dict) -> list[str]:
+    """Use AI to expand keywords with semantically related terms.
+    Considers the workspace context from knowledge map.
+    """
+    if not keywords or not client:
+        return keywords
+
+    # Collect context from KM
+    doc_topics = set()
+    for app in km.get("apps", [])[:5]:
+        for title in app.get("sample_titles", [])[:3]:
+            doc_topics.add(title[:60])
+    room_topics = []
+    for tbl in km.get("base_tables", []):
+        if tbl.get("type") != "chat":
+            continue
+        for room in tbl.get("rooms", [])[:5]:
+            for th in room.get("threads", [])[:2]:
+                room_topics.extend(th.get("keywords", [])[:5])
+
+    prompt = (
+        f'用户想查询: "{",".join(keywords)}"。'
+        f'工作区文档主题: {",".join(list(doc_topics)[:10])}。'
+        f'聊天群话题: {",".join(room_topics[:15])}。'
+        f'请列出所有相关的搜索关键词(含同义词、相关词)，只返回JSON数组: ["词1","词2",...]'
+    )
+    try:
+        resp = client.post("/chat/messages", body={"query": prompt, "stream": False})
+        answer = resp.get("data", {}).get("complete_response", "")
+        match = re.search(r'\[[^\]]+\]', answer)
+        if match:
+            expanded = json.loads(match.group())
+            if isinstance(expanded, list) and expanded:
+                # Dedup, keep original first
+                seen = set(keywords)
+                result = list(keywords)
+                for w in expanded:
+                    if w not in seen and len(w) <= 10:
+                        seen.add(w)
+                        result.append(w)
+                if len(result) > len(keywords):
+                    print(f"   🤖 AI扩展关键词: {keywords} → {result[:8]}")
+                return result
+    except Exception:
+        pass
+    return keywords
+
+
 def _extract_search_keywords(query: str) -> list[str]:
     """Extract meaningful search keywords from the query, excluding time words."""
     # Remove time expressions (longest patterns first!)
@@ -110,7 +158,7 @@ def _extract_search_keywords(query: str) -> list[str]:
         r'本周|本月|今天|昨天|最近',
         '', query)
     # Remove common filler
-    cleaned = re.sub(r'的|情况|一下|帮我|查|看|分析', '', cleaned)
+    cleaned = re.sub(r'的|情况|一下|帮我|查|看|分析|统计|报告|汇总|相关|记录|信息|内容|数据', '', cleaned)
     # Extract Chinese words >= 2 chars
     words = re.findall(r'[一-鿿]{2,}', cleaned)
     return list(dict.fromkeys(words))  # dedup preserving order
@@ -286,9 +334,10 @@ def run_analyze(client, query: str, km_path: Optional[str] = None) -> dict:
         return {"query": query, "keywords": [], "time_range": [], "matched_rooms": [],
                 "total": 0, "summary": "未找到聊天表，请先运行 knowledge-map 生成知识图谱"}
 
-    # 3. Parse time (AI first, regex fallback) + keywords
+    # 3. AI: parse time + extract keywords + expand (regex as fallback)
     start, end = _parse_time_expression(query, client=client)
     keywords = _extract_search_keywords(query)
+    keywords = _expand_keywords_with_ai(client, keywords, km)
 
     print(f"🔍 分析: {query}")
     print(f"   关键词: {keywords}")
