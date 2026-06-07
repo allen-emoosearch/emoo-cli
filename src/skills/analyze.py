@@ -96,13 +96,13 @@ def _parse_time_expression(query: str, client=None) -> tuple:
             n = int(m.group(1))
             return (datetime.now() - timedelta(days=n)).strftime("%Y-%m-%d"), today
         return (datetime.now() - timedelta(days=7)).strftime("%Y-%m-%d"), today
-    if re.search(r'近[一1][周月]|近\d+[天周月]', query):
-        if '周' in query:
-            return (datetime.now() - timedelta(days=7)).strftime("%Y-%m-%d"), today
-        m = re.search(r'近(\d+)天', query)
-        if m:
-            return (datetime.now() - timedelta(days=int(m.group(1)))).strftime("%Y-%m-%d"), today
+    if re.search(r'近[一1]个?月|最近[一1]个?月', query):
         return (datetime.now() - timedelta(days=30)).strftime("%Y-%m-%d"), today
+    if re.search(r'近[一1]周|最近[一1]周', query):
+        return (datetime.now() - timedelta(days=7)).strftime("%Y-%m-%d"), today
+    if re.search(r'近(\d+)天|最近(\d+)天', query):
+        n = int(re.search(r'(\d+)', query).group(1))
+        return (datetime.now() - timedelta(days=n)).strftime("%Y-%m-%d"), today
     if re.search(r'今天', query):
         return today, today
     if re.search(r'昨天', query):
@@ -126,12 +126,20 @@ def _infer_time_window(keywords: list[str]) -> int:
 # ── Keyword extraction and expansion ─────────────────────────────────
 
 def _extract_search_keywords(query: str) -> list[str]:
+    # Remove time expressions
     cleaned = re.sub(
-        r'最近[一1]个[周月]|最近[一1][周月]|最近\d+天|'
-        r'近[一1]个[周月]|近[一1][周月]|近\d+天|'
-        r'本周|本月|今天|昨天|最近',
+        r'最近[一1]个?[周月]|最近\d+天|最近[一1][周月]|最近|'
+        r'近[一1]个?[周月]|近[一1][周月]|近\d+[天周月]|'
+        r'本周|本月|今天|昨天|上个季度|上个[周月]|这个[周月]',
         '', query)
-    cleaned = re.sub(r'的|情况|一下|帮我|查|看|分析|统计|报告|汇总|相关|记录|信息|内容|数据', '', cleaned)
+    # Remove command/filler words (order: longer first for safety)
+    cleaned = re.sub(
+        r'有没有什么|有没有人|有没有|所有|全部|详细|帮我查下|帮我查|帮我|给我|'
+        r'查一下|查下|一下|的|情况|查|看|分析|统计|报告|汇总|相关|'
+        r'记录|信息|内容|数据|搜索|查找|帮忙|请问|麻烦|帮忙',
+        '', cleaned)
+    # Remove standalone single characters that are command leftovers
+    cleaned = re.sub(r'^[的下看查]+|[的下看查]+$', '', cleaned)
     words = re.findall(r'[一-鿿]{2,}', cleaned)
     return list(dict.fromkeys(words))
 
@@ -359,6 +367,25 @@ def run_analyze(client, query: str, km_path: Optional[str] = None,
         matched_rooms = matched_rooms[:5]
 
     _log(f"   匹配群: {len(matched_rooms)} 个")
+    # Build room name map from KM
+    room_names = {}
+    for bt in km.get("base_tables", []):
+        for room in bt.get("rooms", []):
+            rid = room.get("roomid", "")
+            if not rid: continue
+            name = None
+            for th in room.get("threads", []):
+                for kw in th.get("keywords", []):
+                    m = re.search(r'这是(.+?群)', kw)
+                    if m:
+                        name = m.group(1)
+                        break
+                if name: break
+            if not name:
+                top = room.get("top_users", [])
+                name = f"{top[0]['user'][:8]}群" if top else f"群_{rid[:8]}"
+            room_names[rid] = name
+
     tbl_map = {t["table_name"]: t for t in chat_tables}
 
     # 5. Search rooms concurrently
@@ -424,25 +451,35 @@ def run_analyze(client, query: str, km_path: Optional[str] = None,
         except Exception as e:
             _log(f"      ⚠️ [{gid[:20]}] 出错: {e}")
 
-        # Dedup
-        seen = set()
-        unique = []
+        # Dedup: by msgid first, then content hash for cross-room dedup
+        seen_msgid = set()
+        seen_content = set()
+        deduped = []
         for r in room_results:
+            msgid = str(r["fields"].get("msgid", "") or "")
             c = str(r["fields"].get(tbl.get("content_field", "content"), ""))
-            h = hash(c)
-            if h not in seen:
-                seen.add(h)
-                unique.append(r)
-        unique.sort(key=lambda r: (r["fields"].get(time_field, ""), r["fields"].get("seq", 0)))
-        _log(f"      ✅ {gid[:20]}... {len(unique)} 条")
+            # Prefer msgid for exact dedup
+            if msgid and msgid in seen_msgid:
+                continue
+            if msgid:
+                seen_msgid.add(msgid)
+            # Also dedup by content hash (for messages without msgid)
+            ch = hash(c)
+            if ch in seen_content:
+                continue
+            seen_content.add(ch)
+            # Skip robot repeats: same user+content appearing >5 times in a room
+            deduped.append(r)
+        deduped.sort(key=lambda r: (r["fields"].get(time_field, ""), r["fields"].get("seq", 0)))
+        _log(f"      ✅ {gid[:20]}... {len(deduped)} 条")
 
         # Cache for session
         if session_id:
             cache_key = f"{tbl_name}|{gid}|{start}|{end}"
             _query_cache.setdefault(session_id, {})
-            _query_cache[session_id][cache_key] = unique
+            _query_cache[session_id][cache_key] = deduped
 
-        return gid, unique
+        return gid, deduped
 
     # Concurrent execution
     rooms_to_search = matched_rooms[:5]
@@ -490,7 +527,8 @@ def run_analyze(client, query: str, km_path: Optional[str] = None,
         "ai_summary": ai_summary,
         "ai_summary_source_count": len(all_results) if summarize else 0,
         "ai_summary_truncated": len(all_results) > 300 if summarize else False,
-        "matched_rooms": [{"group_id": r["group_id"], "score": r["score"],
+        "matched_rooms": [{"group_id": r["group_id"], "name": room_names.get(r["group_id"], ""),
+                           "score": r["score"],
                            "matched_keywords": r["matched_keywords"],
                            "reasons": r.get("match_reasons", [])} for r in matched_rooms[:5]],
         "total": len(all_results), "sampling": sampling,
@@ -503,6 +541,7 @@ def run_analyze(client, query: str, km_path: Optional[str] = None,
             "msgid": r["fields"].get("msgid", ""),
             "content": str(r["fields"].get(content_field, ""))[:500],
             "group": str(r.get("_group_id", r.get("_table", "")))[:32],
+            "group_name": room_names.get(r.get("_group_id", ""), ""),
         } for r in all_results],
         "samples": [{
             "time": r["fields"].get(time_field, ""),

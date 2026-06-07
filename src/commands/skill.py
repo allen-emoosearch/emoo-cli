@@ -738,8 +738,10 @@ def analyze(ctx, query, km_path, max_results, compact, no_probe_filter, summariz
         lines.append(f"   匹配群: {len(result.get('matched_rooms', []))} 个")
         for r in result.get('matched_rooms', []):
             gid = r.get('group_id', '?')
+            name = r.get('name', '')
+            label = f"{name} ({gid[:12]}...)" if name else gid[:24]
             reasons = r.get('reasons', r.get('matched_keywords', []))
-            lines.append(f"   ✅ {gid[:24]}... ({'; '.join(reasons[:2]) if reasons else ''})")
+            lines.append(f"   ✅ {label} {('(' + '; '.join(reasons[:2]) + ')') if reasons else ''}")
         sampling = result.get('sampling', 'full')
         sampling_note = f" ({sampling})" if sampling != 'full' else ''
         lines.append(f"   结果: {result.get('total', 0)} 条{sampling_note}")
