@@ -362,12 +362,14 @@ def run_analyze(client, query: str, km_path: Optional[str] = None,
         try:
             while True:  # paginate until exhaustion
                 resp = client.post("/data/records/list", body={
-                    "table_name": tbl_name, "page_size": 50,
+                    "table_name": tbl_name, "page_size": 100,
                     "current_page": page, "filters": api_filters,
                 })
                 recs = resp.get("data", {}).get("results", [])
                 if not recs:
                     break
+                if page % 5 == 1:
+                    _log(f"      ⏳ {gid[:20]}... 第{page}页, 已匹配{len(room_results)}条")
                 for r in recs:
                     if exclude_probe and _is_probe(r):
                         continue
