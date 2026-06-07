@@ -393,7 +393,7 @@ def run_analyze(client, query: str, km_path: Optional[str] = None,
             api_filters.append(f"{group_field}:eq:{gid}")
 
         def _fetch_page(p):
-            """Fetch a single page, returns (page_num, records). Get ALL records for AI summarization."""
+            """Fetch a single page, filter noise, return clean records."""
             resp = client.post("/data/records/list", body={
                 "table_name": tbl_name, "page_size": 100,
                 "current_page": p, "filters": api_filters,
@@ -403,12 +403,32 @@ def run_analyze(client, query: str, km_path: Optional[str] = None,
             for r in recs:
                 if exclude_probe and _is_probe(r):
                     continue
-                content = str(r["fields"].get(tbl.get("content_field", "content"), ""))
-                if not content or content == "（无文字内容）":
+                f = r["fields"]
+                # Skip non-text sources (OCR, system events)
+                src = str(f.get("content_source", "text"))
+                if src not in ("text", "mimo:v2.5"):
                     continue
-                r["_group_field"] = group_field
-                r["_group_id"] = gid
-                r["_table"] = tbl_name
+                # Skip system actions
+                action = str(f.get("action", ""))
+                if action in ("switch", "recall"):
+                    continue
+                content = str(f.get(tbl.get("content_field", "content"), ""))
+                if not content or content in ("（无文字内容）", "撤回了一条消息"):
+                    continue
+                # Skip very short messages
+                if len(content.strip()) < 3:
+                    continue
+                if compact:
+                    f = {"time": f.get(time_field, ""),
+                         "from_user": f.get(tbl.get("user_field", "from_user"), ""),
+                         "content": content[:300],
+                         "group": f.get(group_field, ""),
+                         "table": tbl_name}
+                    r = {"fields": f}
+                else:
+                    r["_group_field"] = group_field
+                    r["_group_id"] = gid
+                    r["_table"] = tbl_name
                 results.append(r)
             return p, results
 

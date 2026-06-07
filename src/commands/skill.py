@@ -11,6 +11,42 @@ from ..client import EmooClient
 from ..formatters import output, _progress
 
 
+def _render_markdown(result: dict, query: str) -> None:
+    """Render analyze result as Markdown for AI agent consumption."""
+    lines = []
+    t0, t1 = result.get('time_range', ['?', '?'])
+    lines.append(f"## 分析结果: {query}")
+    lines.append(f"**时间**: {t0} ~ {t1} | **结果**: {result.get('total', 0)} 条")
+    lines.append("")
+
+    if result.get('daily_summary'):
+        lines.append("### 每日分布")
+        lines.append("| 日期 | 消息数 |")
+        lines.append("|------|--------|")
+        for d, c in sorted(result.get('daily_summary', {}).items()):
+            lines.append(f"| {d} | {c} |")
+        lines.append("")
+
+    if result.get('top_people'):
+        lines.append("### 关键人物")
+        for p in result.get('top_people', [])[:5]:
+            lines.append(f"- **{p['user']}**: {p['count']}条")
+        lines.append("")
+
+    if result.get('results'):
+        lines.append("### 消息记录")
+        lines.append("| 时间 | 用户 | 内容 | 群 |")
+        lines.append("|------|------|------|-----|")
+        for r in result['results']:
+            t = r.get('time', '')[:16]
+            u = r.get('user', '?')
+            c = (r.get('content', '') or '')[:100].replace('|', '\\|').replace('\n', ' ')
+            g = r.get('group_name', '') or r.get('group', '')[:12]
+            lines.append(f"| {t} | {u} | {c} | {g} |")
+
+    click.echo('\n'.join(lines))
+
+
 def _default_km_namespace() -> str:
     """Get the KM namespace prefix for current workspace."""
     cfg = {}
@@ -699,8 +735,10 @@ def search(ctx, plan_file, step, max_per_step, csv_path):
 @click.option("--max-results", default=500, help="最多返回结果数 (默认500)")
 @click.option("--compact", is_flag=True, default=False, help="精简输出 (仅保留 time/from/content/group)")
 @click.option("--no-probe-filter", is_flag=True, default=False, help="不过滤探针数据")
+@click.option("--format", "-f", "output_format", type=click.Choice(["text", "md", "json"]), default="text",
+              help="输出格式: text(默认) / md(Markdown) / json")
 @click.pass_context
-def analyze(ctx, query, km_path, max_results, compact, no_probe_filter):
+def analyze(ctx, query, km_path, max_results, compact, no_probe_filter, output_format):
     """智能分析: KM匹配群 → 定向搜索 → 多群聚合.
 
     \b
@@ -725,8 +763,10 @@ def analyze(ctx, query, km_path, max_results, compact, no_probe_filter):
     result = run_analyze(client, query, km_path=km_path, compact=compact,
                          exclude_probe=not no_probe_filter, max_results=max_results)
 
-    if as_json:
+    if as_json or output_format == "json":
         click.echo(json.dumps(result, ensure_ascii=False, indent=2))
+    elif output_format == "md":
+        _render_markdown(result, query)
     else:
         lines = []
         lines.append(f"\n{'='*60}")
