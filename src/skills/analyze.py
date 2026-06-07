@@ -355,6 +355,7 @@ def run_analyze(client, query: str, km_path: Optional[str] = None,
 
         page = 1
         room_results = []
+        room_truncated = False
         api_filters = [f"{time_field}:gte:{start}", f"{time_field}:lte:{end}"]
         if group_field and gid:
             api_filters.append(f"{group_field}:eq:{gid}")
@@ -369,6 +370,8 @@ def run_analyze(client, query: str, km_path: Optional[str] = None,
                 recs = resp.get("data", {}).get("results", [])
                 if not recs:
                     break
+                if page == max_pages and len(recs) == 50:
+                    room_truncated = True  # hit page limit, probably more data
                 for r in recs:
                     if exclude_probe and _is_probe(r):
                         continue
@@ -392,7 +395,8 @@ def run_analyze(client, query: str, km_path: Optional[str] = None,
                 seen.add(h)
                 unique.append(r)
         unique.sort(key=lambda r: (r["fields"].get(time_field, ""), r["fields"].get("seq", 0)))
-        _log(f"      ✅ {gid[:20]}... {len(unique)} 条")
+        truncated_note = " ⚠️已截断" if room_truncated else ""
+        _log(f"      ✅ {gid[:20]}... {len(unique)} 条{truncated_note}")
 
         # Cache for session
         if session_id:
@@ -400,7 +404,7 @@ def run_analyze(client, query: str, km_path: Optional[str] = None,
             _query_cache.setdefault(session_id, {})
             _query_cache[session_id][cache_key] = unique
 
-        return gid, unique
+        return gid, unique, room_truncated
 
     # Concurrent execution
     rooms_to_search = matched_rooms[:5]
@@ -408,8 +412,10 @@ def run_analyze(client, query: str, km_path: Optional[str] = None,
         futures = {pool.submit(_query_room, r): r for r in rooms_to_search}
         for future in as_completed(futures):
             try:
-                gid, results = future.result()
+                gid, results, truncated = future.result()
                 all_results.extend(results)
+                if truncated:
+                    _log(f"      💡 群 {gid[:20]} 数据可能不完整，建议缩小时间范围重新查询")
             except Exception as e:
                 _log(f"      ❌ 群查询失败: {e}")
 
