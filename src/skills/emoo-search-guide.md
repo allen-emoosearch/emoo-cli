@@ -158,17 +158,14 @@ emoo auth clear-cache         # 清除全部缓存
 
 ---
 
-## 四、场景对照表
+## 四、命令速查
 
-| 用户问什么 | 用什么命令 | 备注 |
-|-----------|-----------|------|
-| "近一周发货" | `analyze` | 聊天查询 |
-| "报销情况" | `analyze` | 聊天查询 |
-| "机器故障" | `analyze` | 聊天查询 |
-| "3月发货记录在哪" | `data search` | 文档搜索 |
-| "丰凯有哪些报销制度" | `data search` | 文档搜索 |
-| "CRM里A级客户有哪些" | `base record-list` | 表格查询 |
-| "把所有客户导出来" | `data get` | 大量拉取 |
+| 搜索类型 | 命令 |
+|----------|------|
+| 🗨️ 聊天/群消息 | `emoo skill pipeline analyze` |
+| 📄 文档/知识库 | `emoo data search` (需带 KM 来的 filter) |
+| 📊 结构化表格 | `emoo base record-list` (CRUD 查询) |
+| 📦 大量拉取 | `emoo data get` (无 500 上限) |
 
 ---
 
