@@ -121,25 +121,23 @@ def _discover_chat_tables(km: dict) -> list[dict]:
             "group_field": None,
         }
 
-        # Discover by pattern matching
-        for fname in fields:
-            fn_lower = fname.lower().replace("_", "")
-            for tc in time_candidates:
-                if tc in fn_lower:
-                    discovered["time_field"] = fname
-                    break
-            for uc in user_candidates:
-                if uc in fn_lower:
-                    discovered["user_field"] = fname
-                    break
-            for cc in content_candidates:
-                if cc in fn_lower:
-                    discovered["content_field"] = fname
-                    break
-            for gc in group_candidates:
-                if gc in fn_lower:
-                    discovered["group_field"] = fname
-                    break
+        # Discover by pattern matching — prefer exact/first-candidate matches
+        def _best_match(fnames: list, candidates: list) -> str | None:
+            for candidate in candidates:
+                for fname in fnames:
+                    if candidate == fname.lower().replace("_", ""):
+                        return fname
+            for candidate in candidates:
+                for fname in fnames:
+                    if candidate in fname.lower().replace("_", ""):
+                        return fname
+            return None
+
+        fnames = list(fields.keys())
+        discovered["time_field"] = _best_match(fnames, time_candidates)
+        discovered["user_field"] = _best_match(fnames, user_candidates)
+        discovered["content_field"] = _best_match(fnames, content_candidates)
+        discovered["group_field"] = _best_match(fnames, group_candidates)
 
         # If room data exists, use roomid from there
         if tbl.get("rooms"):
@@ -242,9 +240,30 @@ def run_analyze(client, query: str, km_path: Optional[str] = None) -> dict:
     matched_rooms = _match_rooms(km, keywords) if km else []
     print(f"   匹配群: {len(matched_rooms)} 个")
 
-    # 5. Search matched rooms using discovered field names
+    # 5. Search matched rooms (fallback to all rooms if none matched)
     all_results = []
-    rooms_searched = matched_rooms[:5] if matched_rooms else []
+    if matched_rooms:
+        rooms_searched = matched_rooms[:5]
+    else:
+        # Fallback: search all known rooms
+        print(f"   ⚠️ 无精确匹配群，全局搜索所有聊天群...")
+        rooms_searched = []
+        for tbl in chat_tables:
+            tbl_entry = None
+            for bt in km.get("base_tables", []):
+                if bt.get("table_name") == tbl["table_name"]:
+                    tbl_entry = bt
+                    break
+            if tbl_entry:
+                for room in tbl_entry.get("rooms", []):
+                    rooms_searched.append({
+                        "table_name": tbl["table_name"],
+                        "group_field": tbl["group_field"] or "roomid",
+                        "group_id": room["roomid"],
+                        "matched_keywords": keywords,
+                        "score": 0,
+                    })
+        rooms_searched = rooms_searched[:5]  # limit to 5 rooms for speed
 
     # Build a lookup: table_name → discovered fields
     tbl_map = {t["table_name"]: t for t in chat_tables}
@@ -260,27 +279,28 @@ def run_analyze(client, query: str, km_path: Optional[str] = None) -> dict:
 
         page = 1
         room_results = []
-        while True:
+        api_filters = [
+            f"{time_field}:gte:{start}",
+            f"{time_field}:lte:{end}",
+        ]
+        if group_field and gid:
+            api_filters.append(f"{group_field}:eq:{gid}")
+
+        while page <= 3:  # max 3 pages per room for speed
             resp = client.post("/data/records/list", body={
                 "table_name": tbl_name,
                 "page_size": 100,
                 "current_page": page,
-                "filters": [
-                    f"{time_field}:gte:{start}",
-                    f"{time_field}:lte:{end}",
-                ],
+                "filters": api_filters,
             })
             data = resp.get("data", {})
             recs = data.get("results", [])
             if not recs:
                 break
 
-            # Filter by group + keyword (client-side)
+            # Keyword filter (client-side)
             for r in recs:
-                f = r.get("fields", {})
-                if f.get(group_field) != gid:
-                    continue
-                content = str(f.get(tbl.get("content_field", "content"), ""))
+                content = str(r["fields"].get(tbl.get("content_field", "content"), ""))
                 if any(kw in content for kw in keywords):
                     r["_group_field"] = group_field
                     r["_group_id"] = gid
@@ -288,7 +308,7 @@ def run_analyze(client, query: str, km_path: Optional[str] = None) -> dict:
                     room_results.append(r)
 
             page += 1
-            if len(room_results) >= 500:
+            if len(room_results) >= 200:
                 break
 
         # Dedup by content

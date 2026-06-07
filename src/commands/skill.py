@@ -718,7 +718,8 @@ def analyze(ctx, query, km_path, max_results, as_json):
         _progress(f"   匹配群: {len(result.get('matched_rooms', []))} 个")
         if result.get('matched_rooms'):
             for r in result['matched_rooms']:
-                _progress(f"     - {r['roomid'][:24]}... (相关词: {', '.join(r['matched_keywords'])})")
+                gid = r.get('group_id', r.get('roomid', '?'))
+                _progress(f"     - {gid[:24]}... (相关词: {', '.join(r.get('matched_keywords', []))})")
         _progress(f"   结果: {result['total']} 条")
 
         if result.get('by_date'):
