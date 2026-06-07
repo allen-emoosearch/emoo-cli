@@ -428,8 +428,8 @@ def pipeline():
 @click.option("--max-sample-per-group", default=5, help="每个文档组采样标题数 (默认5)")
 @click.option("--max-doc-groups", default=200, help="最大采样文档组数 (默认200)")
 @click.option("-o", "--output-dir", default=None, help="输出目录 (默认 ~/.emoo/knowledge_map/)")
-@click.option("--auto/--no-auto", "auto_mode", default=True, help="自动缓存模式: 7d内未过期则跳过生成 (默认开启)")
-@click.option("--ttl", default="7d", help="缓存有效期 (格式: 7d/24h/30m, 默认 7d)")
+@click.option("--auto/--no-auto", "auto_mode", default=True, help="自动缓存模式: 24h内未过期则跳过生成 (默认开启)")
+@click.option("--ttl", default="24h", help="缓存有效期 (格式: 24h/24h/30m, 默认 24h)")
 @click.option("--refresh", "force_refresh", is_flag=True, default=False, help="强制重新生成，忽略缓存")
 @click.pass_context
 def knowledge_map(ctx, max_sample_per_group, max_doc_groups, output_dir, auto_mode, ttl, force_refresh):
@@ -437,7 +437,7 @@ def knowledge_map(ctx, max_sample_per_group, max_doc_groups, output_dir, auto_mo
 
     \b
     缓存策略:
-      --auto (默认): 检查缓存，7d内有效则直接返回
+      --auto (默认): 检查缓存，24h内有效则直接返回
       --refresh:     强制重新生成
       --ttl 6h:      自定义缓存有效期
 
@@ -447,7 +447,7 @@ def knowledge_map(ctx, max_sample_per_group, max_doc_groups, output_dir, auto_mo
       emoo_knowledge_map.md    — 人类可读摘要
     """
     # Parse TTL
-    ttl_seconds = 86400 * 7  # default 7 days
+    ttl_seconds = 86400  # default 24h
     if ttl.endswith("d"):
         ttl_seconds = int(ttl[:-1]) * 86400
     elif ttl.endswith("h"):
