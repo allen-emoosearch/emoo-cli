@@ -15,33 +15,88 @@ from datetime import datetime, timedelta
 from typing import Optional
 
 
-def _parse_time_expression(query: str) -> tuple:
-    """Parse time expressions from natural language query.
-    Returns (start_date, end_date) as YYYY-MM-DD strings.
+def _parse_time_with_ai(client, query: str) -> tuple | None:
+    """Use EMOO AI to parse time from natural language.
+    Returns (start, end) or None if failed.
     """
     today = datetime.now().strftime("%Y-%m-%d")
-    yesterday = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
+    prompt = (
+        f'从以下查询中提取时间范围，只返回JSON: {{"start":"YYYY-MM-DD","end":"YYYY-MM-DD","desc":"时间描述"}}。'
+        f'今天是{today}。如无时间信息返回{{"start":"","end":"","desc":"无"}}。'
+        f'\n查询: {query}'
+    )
+    try:
+        resp = client.post("/chat/messages", body={
+            "query": prompt,
+            "stream": False,
+        })
+        answer = resp.get("data", {}).get("complete_response", "")
+        # Extract JSON from response
+        match = re.search(r'\{[^}]+\}', answer)
+        if match:
+            data = json.loads(match.group())
+            if data.get("start") and data.get("end"):
+                return data["start"], data["end"]
+    except Exception:
+        pass
+    return None
 
-    # "近一周" / "最近7天" / "本周"
-    if re.search(r'近[一1]周|最近7天|本周', query):
-        start = (datetime.now() - timedelta(days=7)).strftime("%Y-%m-%d")
-        return start, today
-    # "近一个月" / "最近30天" / "本月"
-    if re.search(r'近[一1]个?月|最近30天|本月', query):
+
+def _parse_time_expression(query: str, client=None) -> tuple:
+    """Parse time expressions from natural language query.
+    Tries AI model first, falls back to regex.
+    Returns (start_date, end_date) as YYYY-MM-DD strings.
+    """
+    # Try AI first
+    if client:
+        result = _parse_time_with_ai(client, query)
+        if result:
+            print(f"   🤖 AI解析时间: {result[0]} ~ {result[1]}")
+            return result
+
+    # Regex fallback (order matters: longest first)
+    today = datetime.now().strftime("%Y-%m-%d")
+    cleaned = query
+    patterns = [
+        (r'最近[一1]个[周月]|最近[一1][周月]|最近\d+天', None),
+        (r'近[一1]个[周月]|近[一1][周月]', None),
+        (r'本周|本月', None),
+    ]
+    _ = patterns  # unused, kept for reference
+
+    if re.search(r'最近[一1]个[周月]|最近[一1][周月]|最近\d+天', query):
+        if re.search(r'[周月]', query):
+            days = 7 if '周' in query else 30
+            start = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
+            return start, today
+        m = re.search(r'(\d+)天', query)
+        if m:
+            n = int(m.group(1))
+            start = (datetime.now() - timedelta(days=n)).strftime("%Y-%m-%d")
+            return start, today
+    if re.search(r'近[一1]个[周月]|近[一1][周月]|近\d+[天周月]', query):
+        if re.search(r'[周]', query):
+            start = (datetime.now() - timedelta(days=7)).strftime("%Y-%m-%d")
+            return start, today
+        m = re.search(r'近(\d+)天', query)
+        if m:
+            n = int(m.group(1))
+            start = (datetime.now() - timedelta(days=n)).strftime("%Y-%m-%d")
+            return start, today
         start = (datetime.now() - timedelta(days=30)).strftime("%Y-%m-%d")
         return start, today
-    # "昨天"
-    if re.search(r'昨天', query):
-        return yesterday, yesterday
-    # "今天"
     if re.search(r'今天', query):
         return today, today
-    # "近3天" / "最近N天"
-    m = re.search(r'近(\d+)天|最近(\d+)天', query)
-    if m:
-        n = int(m.group(1) or m.group(2))
-        start = (datetime.now() - timedelta(days=n)).strftime("%Y-%m-%d")
+    if re.search(r'昨天', query):
+        yesterday = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
+        return yesterday, yesterday
+    if re.search(r'本周', query):
+        start = (datetime.now() - timedelta(days=7)).strftime("%Y-%m-%d")
         return start, today
+    if re.search(r'本月', query):
+        start = (datetime.now() - timedelta(days=30)).strftime("%Y-%m-%d")
+        return start, today
+
     # Default: last 7 days
     return (datetime.now() - timedelta(days=7)).strftime("%Y-%m-%d"), today
 
@@ -231,8 +286,8 @@ def run_analyze(client, query: str, km_path: Optional[str] = None) -> dict:
         return {"query": query, "keywords": [], "time_range": [], "matched_rooms": [],
                 "total": 0, "summary": "未找到聊天表，请先运行 knowledge-map 生成知识图谱"}
 
-    # 3. Parse time + keywords
-    start, end = _parse_time_expression(query)
+    # 3. Parse time (AI first, regex fallback) + keywords
+    start, end = _parse_time_expression(query, client=client)
     keywords = _extract_search_keywords(query)
 
     print(f"🔍 分析: {query}")
