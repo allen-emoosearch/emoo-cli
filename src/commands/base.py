@@ -261,19 +261,25 @@ def record_list(ctx, table_key, table_name, page_size, current_page, filters, so
                 break
             page += 1
 
-        # Apply display pagination
+        # Display pagination: when max_results is set, return all matched
         total_matched = len(all_matched)
-        start = (current_page - 1) * page_size
-        end = start + page_size
+        display_page_size = page_size
+        if max_results and max_results > page_size:
+            display_page_size = min(max_results, 1000)
+
+        start = (current_page - 1) * display_page_size
+        end = start + display_page_size
         paginated = all_matched[start:end]
 
         resp["data"]["results"] = paginated
         resp["data"]["total"] = total_matched
-        resp["data"]["page_size"] = page_size
+        resp["data"]["page_size"] = display_page_size
         resp["data"]["current_page"] = current_page
+        resp["data"]["total_pages"] = -(-total_matched // display_page_size) if total_matched > 0 else 0
         resp["data"]["_source_total"] = source_total
         resp["data"]["_source_pages"] = source_pages
-        if limit and total_matched >= limit:
+        resp["data"]["_matched_total"] = total_matched
+        if limit and total_matched >= 1000:
             resp["data"]["_truncated"] = True
     else:
         body["page_size"] = page_size

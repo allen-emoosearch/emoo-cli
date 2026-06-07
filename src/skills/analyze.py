@@ -160,9 +160,7 @@ def _expand_keywords_with_ai(client, keywords: list[str], km: dict) -> list[str]
                 room_topics.extend(th.get("keywords", [])[:5])
     prompt = (
         f'用户想查询: "{",".join(keywords)}"。'
-        f'文档主题: {",".join(list(doc_topics)[:10])}。'
-        f'群话题: {",".join(room_topics[:15])}。'
-        f'列出所有相关的搜索关键词，只返回JSON数组: ["词1","词2",...]'
+        f'只列出与查询直接相关的搜索关键词(最多5个)，只返回JSON数组: ["词1","词2",...]'
     )
     try:
         resp = client.post("/chat/messages", body={"query": prompt, "stream": False})
@@ -173,8 +171,8 @@ def _expand_keywords_with_ai(client, keywords: list[str], km: dict) -> list[str]
             if isinstance(expanded, list) and expanded:
                 seen = set(keywords)
                 result = list(keywords)
-                for w in expanded:
-                    if w not in seen and len(w) <= 10:
+                for w in expanded[:5]:  # limit to 5
+                    if w not in seen and len(w) <= 8 and not any(c in w for c in '0123456789'):
                         seen.add(w)
                         result.append(w)
                 if len(result) > len(keywords):
@@ -502,12 +500,14 @@ def run_analyze(client, query: str, km_path: Optional[str] = None,
     user_field = tbl.get("user_field", "from_user")
     content_field = tbl.get("content_field", "content")
 
-    # Stratified sampling
+    # Daily summary for all data (not sampled)
+    by_date_full = Counter(r["fields"].get(time_field, "")[:10] for r in all_results)
+    daily_summary = dict(by_date_full.most_common())
+
+    # Stratified sampling for display (skip for summarize — keep all)
     sampling = "full"
-    daily_summary = {}
-    if len(all_results) > 200:
-        by_date = Counter(r["fields"].get(time_field, "")[:10] for r in all_results)
-        daily_summary = dict(by_date.most_common())
+    results_for_summary = all_results  # keep full copy for AI
+    if len(all_results) > 200 and not summarize:
         all_results = _stratified_sample(all_results, 200)
         sampling = "stratified_by_day"
 
@@ -515,18 +515,22 @@ def run_analyze(client, query: str, km_path: Optional[str] = None,
     people = Counter(r["fields"].get(user_field, "?") for r in all_results)
     dates = Counter(r["fields"].get(time_field, "")[:10] for r in all_results)
 
-    # AI Summarization (optional)
+    # AI Summarization — uses full data, not sampled
     ai_summary = ""
-    if summarize and all_results:
-        _log(f"\n   🤖 AI 总结中 (基于 {len(all_results)} 条消息)...")
-        ai_summary = _summarize_with_ai(client, query, all_results)
+    ai_source_count = 0
+    ai_truncated = False
+    if summarize and results_for_summary:
+        ai_source_count = len(results_for_summary)
+        ai_truncated = ai_source_count > 300
+        _log(f"\n   🤖 AI 总结中 (基于全部 {ai_source_count} 条消息)...")
+        ai_summary = _summarize_with_ai(client, query, results_for_summary)
         _log(f"   ✅ 总结完成")
 
     return {
         "query": query, "keywords": keywords, "time_range": [start, end],
         "ai_summary": ai_summary,
-        "ai_summary_source_count": len(all_results) if summarize else 0,
-        "ai_summary_truncated": len(all_results) > 300 if summarize else False,
+        "ai_summary_source_count": ai_source_count,
+        "ai_summary_truncated": ai_truncated,
         "matched_rooms": [{"group_id": r["group_id"], "name": room_names.get(r["group_id"], ""),
                            "score": r["score"],
                            "matched_keywords": r["matched_keywords"],
