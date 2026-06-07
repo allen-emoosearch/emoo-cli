@@ -34,7 +34,12 @@ from typing import Any, Optional
 import yaml
 
 
-SKILLS_DIR = os.path.expanduser("~/.emoo/skills")
+def _skills_dir():
+    """Get workspace-specific skills directory."""
+    from .registry import get_skills_dir
+    return get_skills_dir()
+
+SKILLS_DIR = _skills_dir  # kept as alias for backward compat
 
 # Regex: split frontmatter (between --- delimiters) from markdown body
 _FM_PATTERN = re.compile(r'^---\s*\n(.*?)\n---\s*\n?(.*)', re.DOTALL)
@@ -115,7 +120,9 @@ def parse_skill_file(filepath: str) -> Optional[SkillDef]:
     return SkillDef(raw, body, filepath)
 
 
-def load_all_skills(skills_dir: str = SKILLS_DIR) -> list[SkillDef]:
+def load_all_skills(skills_dir: str = None) -> list[SkillDef]:
+    if skills_dir is None:
+        skills_dir = _skills_dir()
     """Load all valid skill MD files from the skills directory."""
     if not os.path.isdir(skills_dir):
         return []
@@ -129,7 +136,9 @@ def load_all_skills(skills_dir: str = SKILLS_DIR) -> list[SkillDef]:
     return skills
 
 
-def find_skill(name: str, skills_dir: str = SKILLS_DIR) -> Optional[SkillDef]:
+def find_skill(name: str, skills_dir: str = None) -> Optional[SkillDef]:
+    if skills_dir is None:
+        skills_dir = _skills_dir()
     """Find a skill by name (matches filename stem or frontmatter name)."""
     # Try exact filename match first
     filepath = os.path.join(skills_dir, f"{name}.md")

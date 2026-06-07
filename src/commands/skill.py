@@ -32,7 +32,7 @@ from ..skills import generate_knowledge_map, analyze_intent, execute_search_plan
 from ..skills.analyze import run_analyze
 from ..skills.search import export_results_csv
 from ..skills.loader import (
-    load_all_skills, find_skill, validate_params, SKILLS_DIR,
+    load_all_skills, find_skill, validate_params,
 )
 from ..skills.runner import run_skill, export_skill_csv
 from ..skills.registry import (
@@ -166,7 +166,7 @@ def list_skills(ctx, category, type_filter):
         return
 
     if not skills:
-        click.echo(f"[dim]Skills 目录为空 ({SKILLS_DIR})[/dim]")
+        click.echo(f"[dim]Skills 目录为空 ({ensure_skills_dir()})[/dim]")
         click.echo("使用 emoo skill create <name> 创建新 skill")
         return
 
