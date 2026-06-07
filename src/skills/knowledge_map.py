@@ -196,7 +196,7 @@ def _sniff_chat(client, table_name: str, t_entry: dict):
     all_records = []
     try:
         page = 1
-        max_pages = 10  # limit to 1000 records for sniffing
+        max_pages = 10  # 10 pages × 100 = 1000 records for chat sniffing
         while page <= max_pages:
             resp = client.post("/data/records/list", body={
                 "table_name": table_name,
