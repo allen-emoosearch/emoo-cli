@@ -284,11 +284,34 @@ def _stratified_sample(records: list, max_total: int = 200) -> list:
     return sorted(result, key=lambda r: (r.get("fields", {}).get("msgtime", ""), r.get("fields", {}).get("seq", 0)))
 
 
+# ── AI Summarization ─────────────────────────────────────────────────
+
+def _summarize_with_ai(client, query: str, records: list, max_chars: int = 8000) -> str:
+    """Send full room data to AI for summarization."""
+    # Build a compact text representation
+    lines = []
+    for r in records[:300]:  # max 300 messages
+        f = r.get("fields", {})
+        t = f.get("msgtime", "") or f.get("time", "")
+        u = f.get("from_user", "") or f.get("user", "")
+        c = str(f.get("content", "") or "")[:200]
+        lines.append(f"[{t}] {u}: {c}")
+    text = "\n".join(lines)[:max_chars]
+
+    prompt = f'用户查询: {query}\n\n以下是群聊记录(按时间排序):\n\n{text}\n\n请用中文总结: 1)核心事件 2)关键人物 3)时间线 4)问题/风险。控制在300字以内。'
+    try:
+        resp = client.post("/chat/messages", body={"query": prompt, "stream": False})
+        return resp.get("data", {}).get("complete_response", "")
+    except Exception:
+        return ""
+
+
 # ── Main pipeline ────────────────────────────────────────────────────
 
 def run_analyze(client, query: str, km_path: Optional[str] = None,
                 compact: bool = False, exclude_probe: bool = True,
-                max_results: int = 500, session_id: str = None) -> dict:
+                max_results: int = 500, session_id: str = None,
+                summarize: bool = False) -> dict:
     """Execute the full intelligent analysis pipeline."""
 
     # 1. Load KM
@@ -359,23 +382,24 @@ def run_analyze(client, query: str, km_path: Optional[str] = None,
             api_filters.append(f"{group_field}:eq:{gid}")
 
         def _fetch_page(p):
-            """Fetch a single page, returns (page_num, records)."""
+            """Fetch a single page, returns (page_num, records). Get ALL records for AI summarization."""
             resp = client.post("/data/records/list", body={
                 "table_name": tbl_name, "page_size": 100,
                 "current_page": p, "filters": api_filters,
             })
             recs = resp.get("data", {}).get("results", [])
-            matched = []
+            results = []
             for r in recs:
                 if exclude_probe and _is_probe(r):
                     continue
                 content = str(r["fields"].get(tbl.get("content_field", "content"), ""))
-                if any(kw in content for kw in keywords):
-                    r["_group_field"] = group_field
-                    r["_group_id"] = gid
-                    r["_table"] = tbl_name
-                    matched.append(r)
-            return p, matched
+                if not content or content == "（无文字内容）":
+                    continue
+                r["_group_field"] = group_field
+                r["_group_id"] = gid
+                r["_table"] = tbl_name
+                results.append(r)
+            return p, results
 
         try:
             # Page 1: get total for batching
@@ -454,8 +478,16 @@ def run_analyze(client, query: str, km_path: Optional[str] = None,
     people = Counter(r["fields"].get(user_field, "?") for r in all_results)
     dates = Counter(r["fields"].get(time_field, "")[:10] for r in all_results)
 
+    # AI Summarization (optional)
+    ai_summary = ""
+    if summarize and all_results:
+        _log(f"\n   🤖 AI 总结中 (基于 {len(all_results)} 条消息)...")
+        ai_summary = _summarize_with_ai(client, query, all_results)
+        _log(f"   ✅ 总结完成")
+
     return {
         "query": query, "keywords": keywords, "time_range": [start, end],
+        "ai_summary": ai_summary,
         "matched_rooms": [{"group_id": r["group_id"], "score": r["score"],
                            "matched_keywords": r["matched_keywords"],
                            "reasons": r.get("match_reasons", [])} for r in matched_rooms[:5]],
