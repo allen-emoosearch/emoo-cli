@@ -16,6 +16,17 @@ def _progress(msg: str, **kwargs) -> None:
     click.echo(msg, err=True, **kwargs)
 
 
+def _default_km_namespace() -> str:
+    """Get the KM namespace prefix for current workspace."""
+    cfg = {}
+    try:
+        with open(os.path.expanduser("~/.emoo/config.json")) as f:
+            cfg = json.load(f)
+    except Exception:
+        pass
+    return (cfg.get("api_key") or cfg.get("client_id", "default"))[:12]
+
+
 def _default_km_path() -> str:
     """Resolve the default knowledge map path, namespaced by API key."""
     cfg = {}
@@ -100,7 +111,18 @@ def init(no_register):
     """
     skills_dir = ensure_skills_dir()
     click.echo(f"Skills 目录: {skills_dir}")
-    click.echo("使用 emoo skill create <name> 创建 skill")
+
+    # Install built-in search guide skill
+    import shutil
+    pkg_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # src/
+    guide_src = os.path.join(pkg_dir, "skills", "emoo-search-guide.md")
+    if not os.path.exists(guide_src):
+        # Fallback: check relative to CWD (development mode)
+        guide_src = os.path.join(os.getcwd(), "src", "skills", "emoo-search-guide.md")
+    guide_dst = os.path.join(skills_dir, "emoo-search-guide.md")
+    if os.path.exists(guide_src):
+        shutil.copy2(guide_src, guide_dst)
+        click.echo("已安装搜索指南: emoo-search-guide")
 
     if no_register:
         click.echo("\n已跳过 Claude Code 注册 (--no-register)")
@@ -114,7 +136,7 @@ def init(no_register):
 
     click.echo("\n使用 emoo skill list 查看所有 skill")
     click.echo("使用 emoo skill run <name> 执行 skill")
-    click.echo("\n💡 下一步: emoo skill pipeline knowledge-map  (生成知识图谱，后续搜索的基石)")
+    click.echo("\n💡 下一步: emoo skill pipeline knowledge-map  (生成知识图谱，1-2分钟)")
 
 
 # ── register ────────────────────────────────────────────────────────────────
