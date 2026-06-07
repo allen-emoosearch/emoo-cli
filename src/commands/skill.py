@@ -764,7 +764,9 @@ def analyze(ctx, query, km_path, max_results, compact, no_probe_filter, summariz
                 lines.append(f"     {p['user']}: {p['count']}条")
 
         if result.get('ai_summary'):
-            lines.append(f"\n   🤖 AI总结:")
+            src = result.get('ai_summary_source_count', 0)
+            trunc = ' (已截断)' if result.get('ai_summary_truncated') else ''
+            lines.append(f"\n   🤖 AI总结 (基于{src}条消息{trunc}):")
             for line in result['ai_summary'].split('\n'):
                 lines.append(f"     {line}")
 

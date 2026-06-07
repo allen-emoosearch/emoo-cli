@@ -132,14 +132,16 @@ def _extract_search_keywords(query: str) -> list[str]:
         r'近[一1]个?[周月]|近[一1][周月]|近\d+[天周月]|'
         r'本周|本月|今天|昨天|上个季度|上个[周月]|这个[周月]',
         '', query)
-    # Remove command/filler words (order: longer first for safety)
+    # Remove time/command/filler words (longest patterns first)
     cleaned = re.sub(
         r'有没有什么|有没有人|有没有|所有|全部|详细|帮我查下|帮我查|帮我|给我|'
         r'查一下|查下|一下|的|情况|查|看|分析|统计|报告|汇总|相关|'
-        r'记录|信息|内容|数据|搜索|查找|帮忙|请问|麻烦|帮忙',
+        r'记录|信息|内容|数据|搜索|查找|帮忙|请问|麻烦|帮忙|'
+        r'日至|日发货|日期|日至|日至',
         '', cleaned)
-    # Remove standalone single characters that are command leftovers
-    cleaned = re.sub(r'^[的下看查]+|[的下看查]+$', '', cleaned)
+    # Remove standalone single chars and number+chinese combos
+    cleaned = re.sub(r'^[的下看查\d]+|[的下看查\d]+$', '', cleaned)
+    cleaned = re.sub(r'\d+[月日号点分秒]', '', cleaned)
     words = re.findall(r'[一-鿿]{2,}', cleaned)
     return list(dict.fromkeys(words))
 
@@ -292,15 +294,15 @@ def _stratified_sample(records: list, max_total: int = 200) -> list:
 
 # ── AI Summarization ─────────────────────────────────────────────────
 
-def _summarize_with_ai(client, query: str, records: list, max_chars: int = 8000) -> str:
+def _summarize_with_ai(client, query: str, records: list, max_chars: int = 16000) -> str:
     """Send full room data to AI for summarization."""
     # Build a compact text representation
     lines = []
-    for r in records[:300]:  # max 300 messages
+    for r in records[:500]:  # max 500 messages
         f = r.get("fields", {})
         t = f.get("msgtime", "") or f.get("time", "")
         u = f.get("from_user", "") or f.get("user", "")
-        c = str(f.get("content", "") or "")[:200]
+        c = str(f.get("content", "") or "")[:300]
         lines.append(f"[{t}] {u}: {c}")
     text = "\n".join(lines)[:max_chars]
 
@@ -365,7 +367,7 @@ def run_analyze(client, query: str, km_path: Optional[str] = None,
         matched_rooms = matched_rooms[:5]
 
     _log(f"   匹配群: {len(matched_rooms)} 个")
-    # Build room name map from KM
+    # Build room name map from KM — scan thread content for annotations
     room_names = {}
     for bt in km.get("base_tables", []):
         for room in bt.get("rooms", []):
@@ -374,14 +376,21 @@ def run_analyze(client, query: str, km_path: Optional[str] = None,
             name = None
             for th in room.get("threads", []):
                 for kw in th.get("keywords", []):
-                    m = re.search(r'这是(.+?群)', kw)
-                    if m:
-                        name = m.group(1)
-                        break
+                    # Match "标注：这是xxx群" or "这是xxx群，用于..."
+                    for pat in [r'这是(.+?群)', r'(.+?群).*用于', r'标注.*?这是(.+?群)']:
+                        m = re.search(pat, kw)
+                        if m:
+                            name = m.group(1)
+                            break
+                    if name: break
                 if name: break
+            # Fallback: use top user name
             if not name:
                 top = room.get("top_users", [])
-                name = f"{top[0]['user'][:8]}群" if top else f"群_{rid[:8]}"
+                if top:
+                    name = f"{top[0]['user'][:6]}的群"
+                else:
+                    name = f"群_{rid[:8]}"
             room_names[rid] = name
 
     tbl_map = {t["table_name"]: t for t in chat_tables}
@@ -449,24 +458,31 @@ def run_analyze(client, query: str, km_path: Optional[str] = None,
         except Exception as e:
             _log(f"      ⚠️ [{gid[:20]}] 出错: {e}")
 
-        # Dedup: by msgid first, then content hash for cross-room dedup
+        # Multi-level dedup
         seen_msgid = set()
         seen_content = set()
+        seen_time_user = set()  # same user+minute = likely duplicate (forward/repost)
         deduped = []
         for r in room_results:
             msgid = str(r["fields"].get("msgid", "") or "")
             c = str(r["fields"].get(tbl.get("content_field", "content"), ""))
-            # Prefer msgid for exact dedup
+            t = str(r["fields"].get(time_field, "") or "")[:16]  # YYYY-MM-DD HH:MM
+            u = str(r["fields"].get(tbl.get("user_field", "from_user"), "") or "")
+            tu_key = f"{t}|{u}"
+            # Level 1: msgid
             if msgid and msgid in seen_msgid:
                 continue
             if msgid:
                 seen_msgid.add(msgid)
-            # Also dedup by content hash (for messages without msgid)
+            # Level 2: content hash
             ch = hash(c)
             if ch in seen_content:
                 continue
             seen_content.add(ch)
-            # Skip robot repeats: same user+content appearing >5 times in a room
+            # Level 3: same user+minute → keep only first (covers forwards/reposts)
+            if tu_key in seen_time_user:
+                continue
+            seen_time_user.add(tu_key)
             deduped.append(r)
         deduped.sort(key=lambda r: (r["fields"].get(time_field, ""), r["fields"].get("seq", 0)))
         _log(f"      ✅ {gid[:20]}... {len(deduped)} 条")
