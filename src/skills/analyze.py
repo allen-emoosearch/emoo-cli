@@ -15,6 +15,7 @@ import re
 import sys
 import time as _time
 from collections import Counter, defaultdict
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta
 from typing import Optional
 
@@ -312,11 +313,8 @@ def run_analyze(client, query: str, km_path: Optional[str] = None,
     start, end = _parse_time_expression(query, client=client)
     keywords = _extract_search_keywords(query)
     keywords = _expand_keywords_with_ai(client, keywords, km)
-    window_days = _infer_time_window(keywords)
-    max_pages = max(3, window_days // 7)  # 1 week → 3 pages, 1 month → 4 pages
-
     _log(f"🔍 分析: {query}")
-    _log(f"   关键词: {keywords}  时间: {start} ~ {end}  窗口: {window_days}天  pages: {max_pages}")
+    _log(f"   关键词: {keywords}  时间: {start} ~ {end}")
     _log(f"   聊天表: {len(chat_tables)} 个")
 
     # 4. Match rooms
@@ -340,29 +338,20 @@ def run_analyze(client, query: str, km_path: Optional[str] = None,
     _log(f"   匹配群: {len(matched_rooms)} 个")
     tbl_map = {t["table_name"]: t for t in chat_tables}
 
-    # 5. Search
+    # 5. Search rooms concurrently
     all_results = []
-    for room in matched_rooms[:5]:
+
+    def _query_room(room):
+        """Query a single room, returns (room_name, results)."""
         tbl_name = room["table_name"]
         group_field = room["group_field"]
         gid = room["group_id"]
         tbl = tbl_map.get(tbl_name, {})
         time_field = tbl.get("time_field", "msgtime")
 
-        # Check session cache
-        cache_key = f"{tbl_name}|{gid}|{start}|{end}"
-        if session_id:
-            _query_cache.setdefault(session_id, {})
-            if cache_key in _query_cache[session_id]:
-                cached = _query_cache[session_id][cache_key]
-                all_results.extend(cached)
-                _log(f"   📦 缓存命中: {gid[:20]}... (+{len(cached)}条)")
-                continue
-
-        # Show index hint
         reasons = room.get("match_reasons", [])
         reason_str = "; ".join(reasons[:2]) if reasons else f'匹配词: {room.get("matched_keywords", [])}'
-        _log(f"   ✅ [{tbl_name}] {gid[:24]}... {reason_str}")
+        _log(f"   🔍 [{tbl_name}] {gid[:24]}... {reason_str}")
 
         page = 1
         room_results = []
@@ -371,9 +360,10 @@ def run_analyze(client, query: str, km_path: Optional[str] = None,
             api_filters.append(f"{group_field}:eq:{gid}")
 
         try:
+            max_pages = 20
             while page <= max_pages:
                 resp = client.post("/data/records/list", body={
-                    "table_name": tbl_name, "page_size": 100,
+                    "table_name": tbl_name, "page_size": 50,
                     "current_page": page, "filters": api_filters,
                 })
                 recs = resp.get("data", {}).get("results", [])
@@ -384,25 +374,13 @@ def run_analyze(client, query: str, km_path: Optional[str] = None,
                         continue
                     content = str(r["fields"].get(tbl.get("content_field", "content"), ""))
                     if any(kw in content for kw in keywords):
-                        if compact:
-                            f = r["fields"]
-                            r = {"fields": {
-                                "time": f.get(time_field, ""),
-                                "from_user": f.get(tbl.get("user_field", "from_user"), ""),
-                                "content": f.get(tbl.get("content_field", "content"), ""),
-                                "group": f.get(group_field, ""),
-                                "table": tbl_name,
-                            }}
-                        else:
-                            r["_group_field"] = group_field
-                            r["_group_id"] = gid
-                            r["_table"] = tbl_name
+                        r["_group_field"] = group_field
+                        r["_group_id"] = gid
+                        r["_table"] = tbl_name
                         room_results.append(r)
                 page += 1
-                if len(room_results) >= 200:
-                    break
         except Exception as e:
-            _log(f"      ⚠️ 搜索出错: {e}, 跳过")
+            _log(f"      ⚠️ [{gid[:20]}] 出错: {e}")
 
         # Dedup
         seen = set()
@@ -414,12 +392,26 @@ def run_analyze(client, query: str, km_path: Optional[str] = None,
                 seen.add(h)
                 unique.append(r)
         unique.sort(key=lambda r: (r["fields"].get(time_field, ""), r["fields"].get("seq", 0)))
-        all_results.extend(unique)
-        _log(f"      找到 {len(unique)} 条 (去重后)")
+        _log(f"      ✅ {gid[:20]}... {len(unique)} 条")
 
         # Cache for session
         if session_id:
+            cache_key = f"{tbl_name}|{gid}|{start}|{end}"
+            _query_cache.setdefault(session_id, {})
             _query_cache[session_id][cache_key] = unique
+
+        return gid, unique
+
+    # Concurrent execution
+    rooms_to_search = matched_rooms[:5]
+    with ThreadPoolExecutor(max_workers=min(len(rooms_to_search), 5)) as pool:
+        futures = {pool.submit(_query_room, r): r for r in rooms_to_search}
+        for future in as_completed(futures):
+            try:
+                gid, results = future.result()
+                all_results.extend(results)
+            except Exception as e:
+                _log(f"      ❌ 群查询失败: {e}")
 
     # 6. Aggregate
     if not all_results:
