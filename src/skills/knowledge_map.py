@@ -196,7 +196,8 @@ def _sniff_chat(client, table_name: str, t_entry: dict):
     all_records = []
     try:
         page = 1
-        while True:  # fetch all records
+        max_pages = 10  # limit to 1000 records for sniffing
+        while page <= max_pages:
             resp = client.post("/data/records/list", body={
                 "table_name": table_name,
                 "page_size": 100, "current_page": page,
@@ -299,12 +300,12 @@ def _parse_time(ts: str):
 
 
 def _extract_keywords(text: str, min_len: int = 2) -> list[str]:
-    """Extract meaningful Chinese keywords from text."""
+    """Extract meaningful Chinese keywords from text using punctuation-based segmentation."""
     import re
-    # Remove punctuation and numbers
-    text = re.sub(r'[，。！？、；：""''（）\s\d\W]+', ' ', text)
-    words = text.split()
-    # Keep only Chinese words >= min_len chars
+    # Split by Chinese/English punctuation, whitespace, and digits
+    segments = re.split(r'[，。！？、；：""''「」『』【】（）《》\s\d，\.\!\?\;\:\"\'\(\)\[\]\{\}]+', text)
+    words = [s.strip() for s in segments if s.strip()]
+    # Keep only segments with Chinese chars and >= min_len
     result = [w for w in words if len(w) >= min_len and re.search(r'[一-鿿]', w)]
     # Deduplicate preserving order
     seen = set()

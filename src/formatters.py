@@ -2,11 +2,18 @@
 
 import json
 import re
+import sys
 from typing import Optional
 
+import click
 from rich.console import Console
 from rich.table import Table
 from rich.text import Text
+
+
+def _progress(msg: str, **kwargs) -> None:
+    """Write progress/info to stderr so stdout stays clean for JSON consumers."""
+    click.echo(msg, err=True, **kwargs)
 
 console = Console()
 # For JSON output, use plain print to avoid rich control chars in pipes

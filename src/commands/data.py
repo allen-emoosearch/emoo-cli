@@ -5,12 +5,7 @@ import json
 import click
 
 from ..client import EmooClient
-from ..formatters import output
-
-
-def _progress(msg: str, **kwargs) -> None:
-    """Write progress/info to stderr so stdout stays clean for JSON consumers."""
-    click.echo(msg, err=True, **kwargs)
+from ..formatters import output, _progress
 
 
 API_RESULT_CAP = 500

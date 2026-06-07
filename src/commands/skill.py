@@ -8,12 +8,7 @@ import time
 import click
 
 from ..client import EmooClient
-from ..formatters import output
-
-
-def _progress(msg: str, **kwargs) -> None:
-    """Write progress/info to stderr so stdout stays clean for JSON consumers."""
-    click.echo(msg, err=True, **kwargs)
+from ..formatters import output, _progress
 
 
 def _default_km_namespace() -> str:
@@ -702,9 +697,10 @@ def search(ctx, plan_file, step, max_per_step, csv_path):
 @click.option("-k", "--knowledge-map", "km_path", default=None,
               help="知识图谱路径 (默认自动查找缓存)")
 @click.option("--max-results", default=500, help="最多返回结果数 (默认500)")
-@click.option("--json-output", "as_json", is_flag=True, default=False, help="JSON输出")
+@click.option("--compact", is_flag=True, default=False, help="精简输出 (仅保留 time/from/content/group)")
+@click.option("--no-probe-filter", is_flag=True, default=False, help="不过滤探针数据")
 @click.pass_context
-def analyze(ctx, query, km_path, max_results, as_json):
+def analyze(ctx, query, km_path, max_results, compact, no_probe_filter):
     """智能分析: KM匹配群 → 定向搜索 → 多群聚合.
 
     \b
@@ -717,6 +713,7 @@ def analyze(ctx, query, km_path, max_results, as_json):
       emoo skill pipeline analyze "今天裹包运输" --max-results 200
     """
     client = EmooClient(base_url=ctx.obj.get("base_url"), user_id=ctx.obj.get("user_id"))
+    as_json = ctx.obj.get("as_json", False)
 
     if km_path is None:
         default_km = _default_km_path()
@@ -725,35 +722,47 @@ def analyze(ctx, query, km_path, max_results, as_json):
 
     _progress(f"🧠 智能分析: {query}")
 
-    result = run_analyze(client, query, km_path=km_path)
+    result = run_analyze(client, query, km_path=km_path, compact=compact,
+                         exclude_probe=not no_probe_filter, max_results=max_results)
 
     if as_json:
         click.echo(json.dumps(result, ensure_ascii=False, indent=2))
     else:
-        _progress(f"\n{'='*60}")
-        _progress(f"📊 分析结果: {result['query']}")
-        _progress(f"   时间: {result['time_range'][0]} ~ {result['time_range'][1]}")
-        _progress(f"   匹配群: {len(result.get('matched_rooms', []))} 个")
-        if result.get('matched_rooms'):
-            for r in result['matched_rooms']:
-                gid = r.get('group_id', r.get('roomid', '?'))
-                _progress(f"     - {gid[:24]}... (相关词: {', '.join(r.get('matched_keywords', []))})")
-        _progress(f"   结果: {result['total']} 条")
+        lines = []
+        lines.append(f"\n{'='*60}")
+        lines.append(f"📊 分析结果: {result.get('query', query)}")
+        t0, t1 = result.get('time_range', ['?', '?'])
+        lines.append(f"   时间: {t0} ~ {t1}")
+        lines.append(f"   匹配群: {len(result.get('matched_rooms', []))} 个")
+        for r in result.get('matched_rooms', []):
+            gid = r.get('group_id', '?')
+            reasons = r.get('reasons', r.get('matched_keywords', []))
+            lines.append(f"   ✅ {gid[:24]}... ({'; '.join(reasons[:2]) if reasons else ''})")
+        sampling = result.get('sampling', 'full')
+        sampling_note = f" ({sampling})" if sampling != 'full' else ''
+        lines.append(f"   结果: {result.get('total', 0)} 条{sampling_note}")
+
+        if result.get('daily_summary'):
+            lines.append(f"\n   每日消息量 (原始):")
+            for d, c in sorted(result['daily_summary'].items())[:10]:
+                bar = '█' * min(c, 30)
+                lines.append(f"     {d}: {bar} {c}")
 
         if result.get('by_date'):
-            _progress(f"\n   每日分布:")
-            for d, c in result['by_date'].items():
-                bar = "█" * min(c, 30)
-                _progress(f"     {d}: {bar} {c}")
+            lines.append(f"\n   样本分布:")
+            for d, c in result.get('by_date', {}).items():
+                bar = '█' * min(c, 30)
+                lines.append(f"     {d}: {bar} {c}")
 
         if result.get('top_people'):
-            _progress(f"\n   关键人物:")
-            for p in result['top_people'][:5]:
-                _progress(f"     {p['user']}: {p['count']}条")
+            lines.append(f"\n   关键人物:")
+            for p in result.get('top_people', [])[:5]:
+                lines.append(f"     {p['user']}: {p['count']}条")
 
         if result.get('samples'):
-            _progress(f"\n   样本消息:")
-            for s in result['samples'][:8]:
-                _progress(f"     [{s['time']}] {s['user']}: {s['content'][:120]}")
-                g = s.get('group', s.get('room', '?'))
-                _progress(f"      📍 {g}...")
+            lines.append(f"\n   样本消息:")
+            for s in result.get('samples', [])[:8]:
+                lines.append(f"     [{s['time']}] {s['user']}: {s['content'][:120]}")
+                lines.append(f"      📍 {s.get('group', '?')}...")
+
+        click.echo('\n'.join(lines))

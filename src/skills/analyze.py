@@ -1,37 +1,72 @@
 """Intelligent chat analysis pipeline: KM room matching → targeted search → aggregation.
 
-Flow:
-  1. Load knowledge map (cached)
-  2. Match user query against room keywords/topics
-  3. For matched rooms: query records with time + content filters
-  4. Aggregate across rooms: dedup, summarize, present
+Improvements over v2:
+  - Index hints: explains WHY each room was matched
+  - Probe filtering: excludes test_probe records by default
+  - Stratified sampling: day-stratified when >200 results
+  - Query session cache: avoid re-querying same room+time within a session
+  - Smart time window: infer optimal window from keyword type
+  - Compact mode: slim output (time/from/content/group)
 """
 
 import json
 import os
 import re
+import sys
+import time as _time
 from collections import Counter, defaultdict
 from datetime import datetime, timedelta
 from typing import Optional
 
 
+def _log(msg: str):
+    """Write to stderr so stdout stays JSON-clean."""
+    print(msg, file=sys.stderr)
+
+# ── Query session cache ─────────────────────────────────────────────
+
+_query_cache: dict = {}  # keyed by session_id: {cache_key: result}
+
+
+def clear_query_cache(session_id: str = None):
+    """Clear query cache for a session, or all if session_id is None."""
+    global _query_cache
+    if session_id:
+        _query_cache.pop(session_id, None)
+    else:
+        _query_cache = {}
+
+
+# ── Probe/Test detection ────────────────────────────────────────────
+
+def _is_probe(record: dict) -> bool:
+    """Check if a record is a probe/test message to be excluded."""
+    f = record.get("fields", {})
+    msgid = str(f.get("msgid", "") or "")
+    roomid = str(f.get("roomid", "") or "")
+    content = str(f.get("content", "") or "")
+    if msgid.startswith("test_probe"):
+        return True
+    if roomid in ("test", "r1"):
+        return True
+    if content == "probe":
+        return True
+    return False
+
+
+# ── Time parsing ────────────────────────────────────────────────────
+
 def _parse_time_with_ai(client, query: str) -> tuple | None:
-    """Use EMOO AI to parse time from natural language.
-    Returns (start, end) or None if failed.
-    """
+    """Use EMOO AI to parse time from natural language."""
     today = datetime.now().strftime("%Y-%m-%d")
     prompt = (
-        f'从以下查询中提取时间范围，只返回JSON: {{"start":"YYYY-MM-DD","end":"YYYY-MM-DD","desc":"时间描述"}}。'
-        f'今天是{today}。如无时间信息返回{{"start":"","end":"","desc":"无"}}。'
+        f'从以下查询中提取时间范围，只返回JSON: {{"start":"YYYY-MM-DD","end":"YYYY-MM-DD"}}。'
+        f'今天是{today}。如无时间信息返回{{"start":"","end":""}}。'
         f'\n查询: {query}'
     )
     try:
-        resp = client.post("/chat/messages", body={
-            "query": prompt,
-            "stream": False,
-        })
+        resp = client.post("/chat/messages", body={"query": prompt, "stream": False})
         answer = resp.get("data", {}).get("complete_response", "")
-        # Extract JSON from response
         match = re.search(r'\{[^}]+\}', answer)
         if match:
             data = json.loads(match.group())
@@ -43,72 +78,66 @@ def _parse_time_with_ai(client, query: str) -> tuple | None:
 
 
 def _parse_time_expression(query: str, client=None) -> tuple:
-    """Parse time expressions from natural language query.
-    Tries AI model first, falls back to regex.
-    Returns (start_date, end_date) as YYYY-MM-DD strings.
-    """
-    # Try AI first
+    """Try AI first, fall back to regex."""
     if client:
         result = _parse_time_with_ai(client, query)
         if result:
-            print(f"   🤖 AI解析时间: {result[0]} ~ {result[1]}")
+            _log(f"   🤖 AI解析时间: {result[0]} ~ {result[1]}")
             return result
 
-    # Regex fallback (order matters: longest first)
     today = datetime.now().strftime("%Y-%m-%d")
-    cleaned = query
-    patterns = [
-        (r'最近[一1]个[周月]|最近[一1][周月]|最近\d+天', None),
-        (r'近[一1]个[周月]|近[一1][周月]', None),
-        (r'本周|本月', None),
-    ]
-    _ = patterns  # unused, kept for reference
-
-    if re.search(r'最近[一1]个[周月]|最近[一1][周月]|最近\d+天', query):
-        if re.search(r'[周月]', query):
-            days = 7 if '周' in query else 30
-            start = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
-            return start, today
+    # Regex fallback
+    if re.search(r'最近[一1][周月]|最近\d+天', query):
+        if re.search(r'[月]', query):
+            return (datetime.now() - timedelta(days=30)).strftime("%Y-%m-%d"), today
         m = re.search(r'(\d+)天', query)
         if m:
             n = int(m.group(1))
-            start = (datetime.now() - timedelta(days=n)).strftime("%Y-%m-%d")
-            return start, today
-    if re.search(r'近[一1]个[周月]|近[一1][周月]|近\d+[天周月]', query):
-        if re.search(r'[周]', query):
-            start = (datetime.now() - timedelta(days=7)).strftime("%Y-%m-%d")
-            return start, today
+            return (datetime.now() - timedelta(days=n)).strftime("%Y-%m-%d"), today
+        return (datetime.now() - timedelta(days=7)).strftime("%Y-%m-%d"), today
+    if re.search(r'近[一1][周月]|近\d+[天周月]', query):
+        if '周' in query:
+            return (datetime.now() - timedelta(days=7)).strftime("%Y-%m-%d"), today
         m = re.search(r'近(\d+)天', query)
         if m:
-            n = int(m.group(1))
-            start = (datetime.now() - timedelta(days=n)).strftime("%Y-%m-%d")
-            return start, today
-        start = (datetime.now() - timedelta(days=30)).strftime("%Y-%m-%d")
-        return start, today
+            return (datetime.now() - timedelta(days=int(m.group(1)))).strftime("%Y-%m-%d"), today
+        return (datetime.now() - timedelta(days=30)).strftime("%Y-%m-%d"), today
     if re.search(r'今天', query):
         return today, today
     if re.search(r'昨天', query):
-        yesterday = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
-        return yesterday, yesterday
+        return (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d"), (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
     if re.search(r'本周', query):
-        start = (datetime.now() - timedelta(days=7)).strftime("%Y-%m-%d")
-        return start, today
+        return (datetime.now() - timedelta(days=7)).strftime("%Y-%m-%d"), today
     if re.search(r'本月', query):
-        start = (datetime.now() - timedelta(days=30)).strftime("%Y-%m-%d")
-        return start, today
-
-    # Default: last 7 days
+        return (datetime.now() - timedelta(days=30)).strftime("%Y-%m-%d"), today
     return (datetime.now() - timedelta(days=7)).strftime("%Y-%m-%d"), today
 
 
+def _infer_time_window(keywords: list[str]) -> int:
+    """Recommend time window in days based on keyword type."""
+    long_window = {"报销", "费用", "金额", "付款", "支出", "发票", "对账", "财务", "审批", "结算"}
+    for kw in keywords:
+        if kw in long_window:
+            return 30
+    return 7
+
+
+# ── Keyword extraction and expansion ─────────────────────────────────
+
+def _extract_search_keywords(query: str) -> list[str]:
+    cleaned = re.sub(
+        r'最近[一1]个[周月]|最近[一1][周月]|最近\d+天|'
+        r'近[一1]个[周月]|近[一1][周月]|近\d+天|'
+        r'本周|本月|今天|昨天|最近',
+        '', query)
+    cleaned = re.sub(r'的|情况|一下|帮我|查|看|分析|统计|报告|汇总|相关|记录|信息|内容|数据', '', cleaned)
+    words = re.findall(r'[一-鿿]{2,}', cleaned)
+    return list(dict.fromkeys(words))
+
+
 def _expand_keywords_with_ai(client, keywords: list[str], km: dict) -> list[str]:
-    """Use AI to expand keywords with semantically related terms.
-    Considers the workspace context from knowledge map.
-    """
     if not keywords or not client:
         return keywords
-
-    # Collect context from KM
     doc_topics = set()
     for app in km.get("apps", [])[:5]:
         for title in app.get("sample_titles", [])[:3]:
@@ -120,12 +149,11 @@ def _expand_keywords_with_ai(client, keywords: list[str], km: dict) -> list[str]
         for room in tbl.get("rooms", [])[:5]:
             for th in room.get("threads", [])[:2]:
                 room_topics.extend(th.get("keywords", [])[:5])
-
     prompt = (
         f'用户想查询: "{",".join(keywords)}"。'
-        f'工作区文档主题: {",".join(list(doc_topics)[:10])}。'
-        f'聊天群话题: {",".join(room_topics[:15])}。'
-        f'请列出所有相关的搜索关键词(含同义词、相关词)，只返回JSON数组: ["词1","词2",...]'
+        f'文档主题: {",".join(list(doc_topics)[:10])}。'
+        f'群话题: {",".join(room_topics[:15])}。'
+        f'列出所有相关的搜索关键词，只返回JSON数组: ["词1","词2",...]'
     )
     try:
         resp = client.post("/chat/messages", body={"query": prompt, "stream": False})
@@ -134,7 +162,6 @@ def _expand_keywords_with_ai(client, keywords: list[str], km: dict) -> list[str]
         if match:
             expanded = json.loads(match.group())
             if isinstance(expanded, list) and expanded:
-                # Dedup, keep original first
                 seen = set(keywords)
                 result = list(keywords)
                 for w in expanded:
@@ -142,132 +169,58 @@ def _expand_keywords_with_ai(client, keywords: list[str], km: dict) -> list[str]
                         seen.add(w)
                         result.append(w)
                 if len(result) > len(keywords):
-                    print(f"   🤖 AI扩展关键词: {keywords} → {result[:8]}")
+                    _log(f"   🤖 AI扩展关键词: {keywords} → {result[:8]}")
                 return result
     except Exception:
         pass
     return keywords
 
 
-def _extract_search_keywords(query: str) -> list[str]:
-    """Extract meaningful search keywords from the query, excluding time words."""
-    # Remove time expressions (longest patterns first!)
-    cleaned = re.sub(
-        r'最近[一1]个[周月]|最近[一1][周月]|最近\d+天|'
-        r'近[一1]个[周月]|近[一1][周月]|近\d+天|'
-        r'本周|本月|今天|昨天|最近',
-        '', query)
-    # Remove common filler
-    cleaned = re.sub(r'的|情况|一下|帮我|查|看|分析|统计|报告|汇总|相关|记录|信息|内容|数据', '', cleaned)
-    # Extract Chinese words >= 2 chars
-    words = re.findall(r'[一-鿿]{2,}', cleaned)
-    return list(dict.fromkeys(words))  # dedup preserving order
-
-
-def _match_rooms(km: dict, keywords: list[str], min_match: int = 1) -> list[dict]:
-    """Match user keywords against room keywords from knowledge map.
-    Returns list of matched rooms with relevance scores.
-    """
-    base_tables = km.get("base_tables", [])
-    matches = []
-
-    for tbl in base_tables:
-        if tbl.get("type") != "chat":
-            continue
-        for room in tbl.get("rooms", []):
-            # Collect all keywords from all threads
-            all_room_kw = set()
-            for th in room.get("threads", []):
-                all_room_kw.update(th.get("keywords", []))
-            # Also check top users
-            for u in room.get("top_users", []):
-                all_room_kw.add(u.get("user", ""))
-
-            # Score: how many user keywords match room keywords
-            matched = []
-            for uk in keywords:
-                for rk in all_room_kw:
-                    if uk in rk or rk in uk:
-                        matched.append(uk)
-                        break
-
-            if len(set(matched)) >= min_match:
-                matches.append({
-                    "roomid": room["roomid"],
-                    "msgs": room.get("total_msgs", 0),
-                    "users": room.get("user_count", 0),
-                    "matched_keywords": list(set(matched)),
-                    "score": len(set(matched)),
-                    "threads": room.get("threads", []),
-                })
-
-    matches.sort(key=lambda x: -x["score"])
-    return matches
-
+# ── Chat table discovery ─────────────────────────────────────────────
 
 def _discover_chat_tables(km: dict) -> list[dict]:
-    """Discover chat-type Base tables from knowledge map.
-    Returns list of {table_name, time_field, user_field, content_field, group_field}.
-    """
     tables = []
     time_candidates = ["msgtime", "created_at", "updated_at", "synced_at", "date", "time"]
     user_candidates = ["from_user", "user", "username", "sender", "from"]
-    content_candidates = ["content", "text", "message", "body", "msg"]
-    group_candidates = ["roomid", "room_id", "group_id", "channel", "room"]
+    content_candidates = ["content", "text", "message", "body"]
+    group_candidates = ["roomid", "room_id", "group_id", "channel", "room", "conversation_id"]
 
     for tbl in km.get("base_tables", []):
         if tbl.get("type") != "chat":
             continue
-        fields = {f["name"]: f for f in tbl.get("fields", [])}
-
-        discovered = {
+        fnames = [f["name"] for f in tbl.get("fields", [])]
+        tables.append({
             "table_name": tbl["table_name"],
-            "time_field": None,
-            "user_field": None,
-            "content_field": None,
-            "group_field": None,
-        }
-
-        # Discover by pattern matching — prefer exact/first-candidate matches
-        def _best_match(fnames: list, candidates: list) -> str | None:
-            for candidate in candidates:
-                for fname in fnames:
-                    if candidate == fname.lower().replace("_", ""):
-                        return fname
-            for candidate in candidates:
-                for fname in fnames:
-                    if candidate in fname.lower().replace("_", ""):
-                        return fname
-            return None
-
-        fnames = list(fields.keys())
-        discovered["time_field"] = _best_match(fnames, time_candidates)
-        discovered["user_field"] = _best_match(fnames, user_candidates)
-        discovered["content_field"] = _best_match(fnames, content_candidates)
-        discovered["group_field"] = _best_match(fnames, group_candidates)
-
-        # If room data exists, use roomid from there
-        if tbl.get("rooms"):
-            discovered["group_field"] = discovered["group_field"] or "roomid"
-
-        if discovered["time_field"] and discovered["content_field"]:
-            tables.append(discovered)
-
+            "time_field": _best_match(fnames, time_candidates),
+            "user_field": _best_match(fnames, user_candidates),
+            "content_field": _best_match(fnames, content_candidates),
+            "group_field": _best_match(fnames, group_candidates),
+        })
     return tables
 
 
+def _best_match(fnames: list, candidates: list) -> str | None:
+    for c in candidates:
+        for f in fnames:
+            if c == f.lower().replace("_", ""):
+                return f
+    for c in candidates:
+        for f in fnames:
+            if c in f.lower().replace("_", ""):
+                return f
+    return None
+
+
+# ── Room matching with index hints ───────────────────────────────────
+
 def _match_rooms(km: dict, keywords: list[str], min_match: int = 1) -> list[dict]:
-    """Match user keywords against room keywords from knowledge map.
-    Returns list of matched rooms with table_name + group_field for querying.
-    """
+    """Match keywords against KM rooms, returns matched rooms with index hints."""
     matches = []
     chat_tables = _discover_chat_tables(km)
 
     for tbl in chat_tables:
         table_name = tbl["table_name"]
         group_field = tbl["group_field"] or "roomid"
-
-        # Find the matching Base table entry
         tbl_entry = None
         for bt in km.get("base_tables", []):
             if bt.get("table_name") == table_name:
@@ -277,154 +230,181 @@ def _match_rooms(km: dict, keywords: list[str], min_match: int = 1) -> list[dict
             continue
 
         for room in tbl_entry.get("rooms", []):
-            # Collect keywords from threads
             all_room_kw = set()
             for th in room.get("threads", []):
                 all_room_kw.update(th.get("keywords", []))
             for u in room.get("top_users", []):
                 all_room_kw.add(u.get("user", ""))
 
-            # Match
-            matched = []
+            matched_kws = []
+            match_reasons = []
             for uk in keywords:
                 for rk in all_room_kw:
                     if uk in rk or rk in uk:
-                        matched.append(uk)
+                        matched_kws.append(uk)
+                        # Find which thread produced the match
+                        for th in room.get("threads", []):
+                            if uk in " ".join(th.get("keywords", [])):
+                                match_reasons.append(f'"{uk}"→"{th.get("first_msg", "")[:40]}"')
+                                break
                         break
 
-            if len(set(matched)) >= min_match:
+            if len(set(matched_kws)) >= min_match:
                 matches.append({
-                    "table_name": table_name,
-                    "group_field": group_field,
+                    "table_name": table_name, "group_field": group_field,
                     "group_id": room["roomid"],
                     "msgs": room.get("total_msgs", 0),
                     "users": room.get("user_count", 0),
-                    "matched_keywords": list(set(matched)),
-                    "score": len(set(matched)),
+                    "matched_keywords": list(set(matched_kws)),
+                    "match_reasons": match_reasons[:3],
+                    "score": len(set(matched_kws)),
                 })
-
     matches.sort(key=lambda x: -x["score"])
     return matches
 
 
-def run_analyze(client, query: str, km_path: Optional[str] = None) -> dict:
-    """Execute the full intelligent analysis pipeline.
+# ── Stratified sampling ──────────────────────────────────────────────
 
-    Dynamically discovers chat tables, group fields, and time fields
-    from the knowledge map — no hardcoded field names.
-    """
-    # 1. Load knowledge map
+def _stratified_sample(records: list, max_total: int = 200) -> list:
+    """Day-stratified sampling: keep proportional records per day."""
+    if len(records) <= max_total:
+        return records
+    by_date = defaultdict(list)
+    for r in records:
+        t = r.get("fields", {}).get("msgtime", "")[:10]
+        by_date[t].append(r)
+    n_days = len(by_date)
+    per_day = max(max_total // n_days, 3)
+    result = []
+    for day in sorted(by_date.keys()):
+        result.extend(by_date[day][:per_day])
+    if len(result) > max_total:
+        result = result[:max_total]
+    return sorted(result, key=lambda r: (r.get("fields", {}).get("msgtime", ""), r.get("fields", {}).get("seq", 0)))
+
+
+# ── Main pipeline ────────────────────────────────────────────────────
+
+def run_analyze(client, query: str, km_path: Optional[str] = None,
+                compact: bool = False, exclude_probe: bool = True,
+                max_results: int = 500, session_id: str = None) -> dict:
+    """Execute the full intelligent analysis pipeline."""
+
+    # 1. Load KM
     if km_path is None:
         km_path = os.path.expanduser("~/.emoo/knowledge_map")
         if os.path.isdir(km_path):
-            api_paths = [d for d in os.listdir(km_path)
-                        if os.path.isdir(os.path.join(km_path, d))]
+            api_paths = [d for d in os.listdir(km_path) if os.path.isdir(os.path.join(km_path, d))]
             if api_paths:
-                km_path = os.path.join(km_path, api_paths[0],
-                                       "emoo_knowledge_map.json")
-
+                km_path = os.path.join(km_path, api_paths[0], "emoo_knowledge_map.json")
     km = {}
     if os.path.exists(km_path):
         with open(km_path, encoding="utf-8") as f:
             km = json.load(f)
 
-    # 2. Discover chat tables and their fields
+    # 2. Discover chat tables
     chat_tables = _discover_chat_tables(km)
     if not chat_tables:
-        return {"query": query, "keywords": [], "time_range": [], "matched_rooms": [],
-                "total": 0, "summary": "未找到聊天表，请先运行 knowledge-map 生成知识图谱"}
+        return {"query": query, "total": 0,
+                "summary": "未找到聊天表，请先运行 knowledge-map 生成知识图谱"}
 
-    # 3. AI: parse time + extract keywords + expand (regex as fallback)
+    # 3. Parse time + keywords
     start, end = _parse_time_expression(query, client=client)
     keywords = _extract_search_keywords(query)
     keywords = _expand_keywords_with_ai(client, keywords, km)
+    window_days = _infer_time_window(keywords)
+    max_pages = max(3, window_days // 7)  # 1 week → 3 pages, 1 month → 4 pages
 
-    print(f"🔍 分析: {query}")
-    print(f"   关键词: {keywords}")
-    print(f"   时间: {start} ~ {end}")
-    print(f"   聊天表: {len(chat_tables)} 个")
+    _log(f"🔍 分析: {query}")
+    _log(f"   关键词: {keywords}  时间: {start} ~ {end}  窗口: {window_days}天  pages: {max_pages}")
+    _log(f"   聊天表: {len(chat_tables)} 个")
 
-    # 4. Match rooms across all chat tables
+    # 4. Match rooms
     matched_rooms = _match_rooms(km, keywords) if km else []
-    print(f"   匹配群: {len(matched_rooms)} 个")
-
-    # 5. Search matched rooms (fallback to all rooms if none matched)
-    all_results = []
-    if matched_rooms:
-        rooms_searched = matched_rooms[:5]
-    else:
-        # Fallback: search all known rooms
-        print(f"   ⚠️ 无精确匹配群，全局搜索所有聊天群...")
-        rooms_searched = []
+    if not matched_rooms:
+        _log(f"   ⚠️ 无精确匹配群，全局搜索...")
+        tbl_map = {t["table_name"]: t for t in chat_tables}
         for tbl in chat_tables:
-            tbl_entry = None
             for bt in km.get("base_tables", []):
                 if bt.get("table_name") == tbl["table_name"]:
-                    tbl_entry = bt
+                    for room in bt.get("rooms", []):
+                        matched_rooms.append({
+                            "table_name": tbl["table_name"],
+                            "group_field": tbl["group_field"] or "roomid",
+                            "group_id": room["roomid"],
+                            "matched_keywords": keywords, "score": 0, "match_reasons": [],
+                        })
                     break
-            if tbl_entry:
-                for room in tbl_entry.get("rooms", []):
-                    rooms_searched.append({
-                        "table_name": tbl["table_name"],
-                        "group_field": tbl["group_field"] or "roomid",
-                        "group_id": room["roomid"],
-                        "matched_keywords": keywords,
-                        "score": 0,
-                    })
-        rooms_searched = rooms_searched[:5]  # limit to 5 rooms for speed
+        matched_rooms = matched_rooms[:5]
 
-    # Build a lookup: table_name → discovered fields
+    _log(f"   匹配群: {len(matched_rooms)} 个")
     tbl_map = {t["table_name"]: t for t in chat_tables}
 
-    for room in rooms_searched:
+    # 5. Search
+    all_results = []
+    for room in matched_rooms[:5]:
         tbl_name = room["table_name"]
         group_field = room["group_field"]
         gid = room["group_id"]
         tbl = tbl_map.get(tbl_name, {})
         time_field = tbl.get("time_field", "msgtime")
 
-        print(f"   搜索 [{tbl_name}] {gid[:20]}... (关联词: {room['matched_keywords']})")
+        # Check session cache
+        cache_key = f"{tbl_name}|{gid}|{start}|{end}"
+        if session_id:
+            _query_cache.setdefault(session_id, {})
+            if cache_key in _query_cache[session_id]:
+                cached = _query_cache[session_id][cache_key]
+                all_results.extend(cached)
+                _log(f"   📦 缓存命中: {gid[:20]}... (+{len(cached)}条)")
+                continue
+
+        # Show index hint
+        reasons = room.get("match_reasons", [])
+        reason_str = "; ".join(reasons[:2]) if reasons else f'匹配词: {room.get("matched_keywords", [])}'
+        _log(f"   ✅ [{tbl_name}] {gid[:24]}... {reason_str}")
 
         page = 1
         room_results = []
-        api_filters = [
-            f"{time_field}:gte:{start}",
-            f"{time_field}:lte:{end}",
-        ]
+        api_filters = [f"{time_field}:gte:{start}", f"{time_field}:lte:{end}"]
         if group_field and gid:
             api_filters.append(f"{group_field}:eq:{gid}")
 
-        # Limit pages for long time ranges (>7 days: 1 page, <=7: 3 pages)
-        max_pages = 1 if (datetime.strptime(end, "%Y-%m-%d") - datetime.strptime(start, "%Y-%m-%d")).days > 7 else 3
         try:
             while page <= max_pages:
                 resp = client.post("/data/records/list", body={
-                    "table_name": tbl_name,
-                    "page_size": 100,
-                    "current_page": page,
-                    "filters": api_filters,
+                    "table_name": tbl_name, "page_size": 100,
+                    "current_page": page, "filters": api_filters,
                 })
-                data = resp.get("data", {})
-                recs = data.get("results", [])
+                recs = resp.get("data", {}).get("results", [])
                 if not recs:
                     break
-
-                # Keyword filter (client-side)
                 for r in recs:
+                    if exclude_probe and _is_probe(r):
+                        continue
                     content = str(r["fields"].get(tbl.get("content_field", "content"), ""))
                     if any(kw in content for kw in keywords):
-                        r["_group_field"] = group_field
-                        r["_group_id"] = gid
-                        r["_table"] = tbl_name
+                        if compact:
+                            f = r["fields"]
+                            r = {"fields": {
+                                "time": f.get(time_field, ""),
+                                "from_user": f.get(tbl.get("user_field", "from_user"), ""),
+                                "content": f.get(tbl.get("content_field", "content"), ""),
+                                "group": f.get(group_field, ""),
+                                "table": tbl_name,
+                            }}
+                        else:
+                            r["_group_field"] = group_field
+                            r["_group_id"] = gid
+                            r["_table"] = tbl_name
                         room_results.append(r)
-
                 page += 1
                 if len(room_results) >= 200:
                     break
         except Exception as e:
-            print(f"      ⚠️ 搜索出错: {e}, 跳过此群")
+            _log(f"      ⚠️ 搜索出错: {e}, 跳过")
 
-        # Dedup by content
+        # Dedup
         seen = set()
         unique = []
         for r in room_results:
@@ -433,52 +413,50 @@ def run_analyze(client, query: str, km_path: Optional[str] = None) -> dict:
             if h not in seen:
                 seen.add(h)
                 unique.append(r)
-
-        user_field = tbl.get("user_field", "from_user")
-        unique.sort(key=lambda r: (r["fields"].get(time_field, ""),
-                                    r["fields"].get("seq", 0)))
+        unique.sort(key=lambda r: (r["fields"].get(time_field, ""), r["fields"].get("seq", 0)))
         all_results.extend(unique)
-        print(f"      找到 {len(unique)} 条 (去重后)")
+        _log(f"      找到 {len(unique)} 条 (去重后)")
 
-    # 6. Aggregate using discovered fields
+        # Cache for session
+        if session_id:
+            _query_cache[session_id][cache_key] = unique
+
+    # 6. Aggregate
     if not all_results:
-        return {
-            "query": query, "keywords": keywords,
-            "time_range": [start, end], "matched_rooms": matched_rooms,
-            "total": 0, "summary": "未找到匹配内容",
-        }
+        return {"query": query, "keywords": keywords, "time_range": [start, end],
+                "matched_rooms": matched_rooms, "total": 0, "summary": "未找到匹配内容"}
 
-    # Use the first chat table's field mapping for extraction
-    default_tbl = chat_tables[0] if chat_tables else {}
-    time_field = default_tbl.get("time_field", "msgtime")
-    user_field = default_tbl.get("user_field", "from_user")
-    content_field = default_tbl.get("content_field", "content")
+    tbl = chat_tables[0] if chat_tables else {}
+    time_field = tbl.get("time_field", "msgtime")
+    user_field = tbl.get("user_field", "from_user")
+    content_field = tbl.get("content_field", "content")
 
-    all_results.sort(key=lambda r: (r["fields"].get(time_field, ""),
-                                     r["fields"].get("seq", 0)))
+    # Stratified sampling
+    sampling = "full"
+    daily_summary = {}
+    if len(all_results) > 200:
+        by_date = Counter(r["fields"].get(time_field, "")[:10] for r in all_results)
+        daily_summary = dict(by_date.most_common())
+        all_results = _stratified_sample(all_results, 200)
+        sampling = "stratified_by_day"
 
+    all_results.sort(key=lambda r: (r["fields"].get(time_field, ""), r["fields"].get("seq", 0)))
     people = Counter(r["fields"].get(user_field, "?") for r in all_results)
-    dates = Counter(r["fields"].get(time_field, "")[:10] for r in all_results
-                    if r["fields"].get(time_field))
+    dates = Counter(r["fields"].get(time_field, "")[:10] for r in all_results)
 
     return {
-        "query": query,
-        "keywords": keywords,
-        "time_range": [start, end],
-        "matched_rooms": [{
-            "table": r["table_name"],
-            "group_id": r["group_id"],
-            "score": r["score"],
-            "matched_keywords": r["matched_keywords"],
-        } for r in matched_rooms[:5]],
-        "total": len(all_results),
+        "query": query, "keywords": keywords, "time_range": [start, end],
+        "matched_rooms": [{"group_id": r["group_id"], "score": r["score"],
+                           "matched_keywords": r["matched_keywords"],
+                           "reasons": r.get("match_reasons", [])} for r in matched_rooms[:5]],
+        "total": len(all_results), "sampling": sampling,
+        "daily_summary": daily_summary,
         "by_date": {d: c for d, c in sorted(dates.items())},
         "top_people": [{"user": u, "count": c} for u, c in people.most_common(10)],
         "samples": [{
-            "table": r.get("_table", ""),
             "time": r["fields"].get(time_field, ""),
             "user": r["fields"].get(user_field, ""),
             "content": str(r["fields"].get(content_field, ""))[:200],
-            "group": str(r.get("_group_id", ""))[:20],
+            "group": str(r.get("_group_id", r.get("_table", "")))[:20],
         } for r in all_results[:20]],
     }
