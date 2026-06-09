@@ -146,14 +146,14 @@ def init(no_register):
     # Install built-in skills (search guide + analyze skill)
     import shutil
     pkg_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # src/
-    for skill_file in ["emoo-search-guide.md", "emoo-analyze.md"]:
+    for skill_file in ["emoo-install.md", "emoo-search-guide.md", "emoo-analyze.md"]:
         src = os.path.join(pkg_dir, "skills", skill_file)
         if not os.path.exists(src):
             src = os.path.join(os.getcwd(), "src", "skills", skill_file)
         dst = os.path.join(skills_dir, skill_file)
         if os.path.exists(src):
             shutil.copy2(src, dst)
-    click.echo("已安装: emoo-search-guide + emoo-analyze")
+    click.echo("已安装: emoo + emoo-analyze + emoo-search-guide")
 
     if no_register:
         click.echo("\n已跳过 Claude Code 注册 (--no-register)")
