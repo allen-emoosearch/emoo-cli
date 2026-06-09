@@ -146,7 +146,7 @@ def init(no_register):
     # Install built-in skills (search guide + analyze skill)
     import shutil
     pkg_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # src/
-    for skill_file in ["emoo-install.md", "emoo-search-guide.md", "emoo-analyze.md"]:
+    for skill_file in ["skill.md", "emoo-search-guide.md", "emoo-analyze.md"]:
         src = os.path.join(pkg_dir, "skills", skill_file)
         if not os.path.exists(src):
             src = os.path.join(os.getcwd(), "src", "skills", skill_file)

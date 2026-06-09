@@ -141,3 +141,13 @@ emoo auth switch --save <name> # 保存当前配置
 5. **user/group**: 必须数字 ID，先 `emoo contact list` 确认
 6. **version**: `emoo --version` 检查版本
 7. **cache**: `emoo auth clear-cache` 手动清除缓存
+
+## 内置 Skills
+
+`emoo skill init` 安装三个 skill:
+
+| Skill | 用途 |
+|-------|------|
+| `emoo` (本文件) | 安装+初始化+全命令+SOP |
+| `emoo-analyze` | 群聊智能分析: `emoo skill run emoo-analyze --query "近一周发货"` |
+| `emoo-search-guide` | 搜索策略详解+命令速查+禁止事项 |
