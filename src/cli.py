@@ -33,7 +33,7 @@ _V = _pkg_version("emoo-cli")
 @click.option("--user-id", envvar="EMOO_USER_ID",
               help="用户 open_id (OAuth2 方式，可用 emoo contact list 获取)")
 @click.option("--base-url", envvar="EMOO_BASE_URL",
-              help="API Base URL (默认 https://app.emoosearch.com/open-api/v1)")
+              help="API Base URL (默认 https://app.emooai.com/open-api/v1)")
 @click.option("--no-cache", "no_cache", is_flag=True, default=False,
               help="禁用请求缓存 (默认开启5分钟)")
 @click.option("--cache-ttl", "cache_ttl", type=int, default=None,

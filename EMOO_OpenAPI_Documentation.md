@@ -1,8 +1,8 @@
 # EMOO 开放平台 API 文档
 
-> **Base URL:** `https://app.emoosearch.com/open-api/v1`
+> **Base URL:** `https://app.emooai.com/open-api/v1`
 > **认证方式:** Bearer Token (HTTP `Authorization: Bearer <token>`)
-> **文档来源:** https://open.emoosearch.com
+> **文档来源:** https://open.emooai.com
 > **生成日期:** 2026-05-29
 
 ---
@@ -76,7 +76,7 @@
 **请求示例 (Shell)：**
 
 ```bash
-curl -X GET "https://app.emoosearch.com/open-api/v1/auth/token?grant_type=client_credentials&client_id=YOUR_CLIENT_ID&client_secret=YOUR_CLIENT_SECRET"
+curl -X GET "https://app.emooai.com/open-api/v1/auth/token?grant_type=client_credentials&client_id=YOUR_CLIENT_ID&client_secret=YOUR_CLIENT_SECRET"
 ```
 
 **返回字段：**

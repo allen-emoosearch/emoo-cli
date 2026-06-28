@@ -9,7 +9,7 @@ from typing import Optional
 CONFIG_DIR = Path.home() / ".emoo"
 CONFIG_FILE = CONFIG_DIR / "config.json"
 
-DEFAULT_BASE_URL = "https://app.emoosearch.com/open-api/v1"
+DEFAULT_BASE_URL = "https://app.emooai.com/open-api/v1"
 
 
 def _ensure_dir() -> None:

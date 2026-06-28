@@ -145,7 +145,7 @@ emoo auth login --api-key emoo_xxx
 | 选项 | 环境变量 | 说明 |
 |------|----------|------|
 | `--user-id <id>` | `EMOO_USER_ID` | Emoo-User-Id 请求头 (OAuth2 方式必填，API Key 方式无需) |
-| `--base-url <url>` | `EMOO_BASE_URL` | API 地址，默认 `https://app.emoosearch.com/open-api/v1` |
+| `--base-url <url>` | `EMOO_BASE_URL` | API 地址，默认 `https://app.emooai.com/open-api/v1` |
 | `--json` | — | 输出原始 JSON（默认用 rich 表格美化输出） |
 
 ```bash
@@ -1121,7 +1121,7 @@ emoo data get --stream 2>/dev/null \
 | `EMOO_CLIENT_ID` | OAuth2 客户端 ID |
 | `EMOO_CLIENT_SECRET` | OAuth2 客户端密钥 |
 | `EMOO_USER_ID` | 默认 Emoo-User-Id（OAuth2 方式使用） |
-| `EMOO_BASE_URL` | API 地址，默认 `https://app.emoosearch.com/open-api/v1` |
+| `EMOO_BASE_URL` | API 地址，默认 `https://app.emooai.com/open-api/v1` |
 
 ```bash
 # API Key 方式
@@ -1199,7 +1199,7 @@ emoo base column-delete                    删除列
 ```json
 {
   "api_key": "emoo_xxx",
-  "base_url": "https://app.emoosearch.com/open-api/v1"
+  "base_url": "https://app.emooai.com/open-api/v1"
 }
 ```
 
@@ -1210,7 +1210,7 @@ emoo base column-delete                    删除列
   "client_secret": "yyy",
   "access_token": "eyJ...",
   "expires_at": 1778785232,
-  "base_url": "https://app.emoosearch.com/open-api/v1",
+  "base_url": "https://app.emooai.com/open-api/v1",
   "default_user_id": "open_xxx"
 }
 ```
