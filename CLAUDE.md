@@ -9,7 +9,8 @@ installed `emoo` command will still run the stale code.
 ## Prerequisites
 
 - Config stored at `~/.emoo/config.json`
-- Two auth modes: API Key (recommended, no `--user-id` needed) or OAuth2 (needs `--user-id`)
+- Two auth modes: API Key (recommended, no `--user-id` needed for most commands) or OAuth2 (needs `--user-id`)
+- Agent/Role/Permission commands ALWAYS need `--user-id` regardless of auth mode
 - All commands auto-refresh OAuth2 tokens 60s before expiry
 
 ## Search Strategy (ALWAYS follow this order)

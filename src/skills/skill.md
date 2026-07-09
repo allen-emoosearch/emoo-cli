@@ -110,6 +110,42 @@ emoo auth switch <name>       # 切换工作区 (skills + KM 自动跟随)
 emoo auth switch --save <name> # 保存当前配置
 ```
 
+### Agent 管理 (第三方集成)
+```bash
+# 支持 4 种类型: webhook / dify / coze / timus
+emoo agent list [--agent-type webhook]              # Agent 列表
+emoo agent create -n <name> -t <type> -c '<json>'   # 创建 Agent
+emoo agent get <ws_agent_key>                       # Agent 详情
+emoo agent update <key> --title <new>               # 更新 Agent
+emoo agent delete <key> -f                          # 删除 Agent
+
+# 不同 agent_type 的 config 示例:
+# webhook: {"webhook_url":"https://...","auth_type":"none","response_mode":"json"}
+# dify:    {"base_url":"https://api.dify.ai","api_key":"sk-xxx"}
+# coze:    {"base_url":"https://api.coze.com","access_token":"xxx","bot_id":"123"}
+# timus:   {"base_url":"https://...","access_token":"xxx","agentCode":"a-001"}
+```
+
+### 角色管理
+```bash
+emoo role list [--keyword "技术"]           # 角色列表
+emoo role create -n <name> [-d <desc>]      # 创建角色
+emoo role update <id> --name <new>          # 更新角色
+emoo role delete <id> -f                    # 删除角色
+emoo role members-add <id> <open_id...>     # 批量添加成员
+emoo role members-remove <id> <open_id>     # 移除成员
+```
+
+### 表权限管理
+```bash
+emoo base permission list --table-key <key>    # 查看权限
+emoo base permission create --table-key <key>  # 创建权限策略
+emoo base permission update <role_key>         # 更新权限策略
+emoo base permission delete <role_key> -f      # 删除权限策略
+```
+
+> **注意**: Agent/Role/Permission 命令需要传 `--user-id <open_id>`，可用 `emoo contact list` 获取。
+
 ## 字段类型写入格式 (重要)
 
 | 类型 | 写入 | ❌ 常见错误 |
