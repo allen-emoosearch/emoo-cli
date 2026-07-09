@@ -351,5 +351,244 @@
       {"name": "column_key", "type": "string", "required": "条件", "desc": "列标识（与 column_name 二选一）"},
       {"name": "column_name", "type": "string", "required": "条件", "desc": "列名称（与 column_key 二选一）"}
     ]
+  },
+
+  "agent.list": {
+    "method": "GET",
+    "path": "/agents",
+    "auth_required": true,
+    "user_id_required": true,
+    "description": "获取当前 workspace 下的 agent 列表（分页），可按 agent_type 过滤",
+    "params": [
+      {"name": "page_size", "type": "integer", "required": false, "desc": "每页数量 (1-200, 默认20)"},
+      {"name": "current_page", "type": "integer", "required": false, "desc": "页码 (默认1)"},
+      {"name": "agent_type", "type": "string", "required": false, "desc": "类型过滤: webhook / dify / coze / timus"}
+    ],
+    "response": {
+      "data.total": "integer",
+      "data.results[]": "Agent — ws_agent_key, title, agent_type, is_enabled, description, scope, created_at, updated_at"
+    }
+  },
+  "agent.create": {
+    "method": "POST",
+    "path": "/agents",
+    "auth_required": true,
+    "user_id_required": true,
+    "description": "创建 agent。支持 4 种集成类型 (webhook/dify/coze/timus)，config 按类型有不同结构",
+    "body": [
+      {"name": "title", "type": "string", "required": true, "desc": "Agent 显示名称 (≤100字符)"},
+      {"name": "agent_type", "type": "string", "required": true, "desc": "集成类型: webhook / dify / coze / timus"},
+      {"name": "config", "type": "object", "required": true, "desc": "集成配置 (WebhookConfig/DifyConfig/CozeConfig/TimusConfig 之一)"},
+      {"name": "is_enabled", "type": "boolean", "required": false, "desc": "是否启用 (默认 true)"},
+      {"name": "description", "type": "string", "required": false, "desc": "描述"},
+      {"name": "scope", "type": "string", "required": false, "desc": "可见范围: public / specified_ws_groups"},
+      {"name": "specified_ws_group_ids", "type": "array[integer]", "required": false, "desc": "scope=specified_ws_groups 时必填"}
+    ],
+    "response": {
+      "data": "Agent — ws_agent_key, title, agent_type, is_enabled, description, created_at, updated_at"
+    }
+  },
+  "agent.get": {
+    "method": "GET",
+    "path": "/agents/{ws_agent_key}",
+    "auth_required": true,
+    "user_id_required": true,
+    "description": "获取指定 agent 的详情",
+    "params": [
+      {"name": "ws_agent_key", "type": "string", "required": true, "desc": "Agent 唯一标识"}
+    ],
+    "response": {
+      "data": "Agent 完整对象"
+    }
+  },
+  "agent.update": {
+    "method": "PATCH",
+    "path": "/agents/{ws_agent_key}",
+    "auth_required": true,
+    "user_id_required": true,
+    "description": "部分更新 agent 配置。agent_type 不可修改",
+    "params": [
+      {"name": "ws_agent_key", "type": "string", "required": true, "desc": "Agent 唯一标识"}
+    ],
+    "body": [
+      {"name": "title", "type": "string", "required": false, "desc": "新名称"},
+      {"name": "is_enabled", "type": "boolean", "required": false, "desc": "启用/禁用"},
+      {"name": "description", "type": "string", "required": false, "desc": "描述"},
+      {"name": "config", "type": "object", "required": false, "desc": "集成配置 (须符合当前 agent_type)"},
+      {"name": "scope", "type": "string", "required": false, "desc": "可见范围"},
+      {"name": "specified_ws_group_ids", "type": "array[integer]", "required": false, "desc": "角色 ID 列表"}
+    ],
+    "response": {
+      "data": "Agent 完整对象"
+    }
+  },
+  "agent.delete": {
+    "method": "DELETE",
+    "path": "/agents/{ws_agent_key}",
+    "auth_required": true,
+    "user_id_required": true,
+    "description": "删除 agent",
+    "params": [
+      {"name": "ws_agent_key", "type": "string", "required": true, "desc": "Agent 唯一标识"}
+    ]
+  },
+
+  "role.list": {
+    "method": "GET",
+    "path": "/ws-groups",
+    "auth_required": true,
+    "user_id_required": true,
+    "description": "获取当前 workspace 下的角色列表（分页），支持关键字搜索",
+    "params": [
+      {"name": "page_size", "type": "integer", "required": false, "desc": "每页数量 (1-200, 默认20)"},
+      {"name": "current_page", "type": "integer", "required": false, "desc": "页码 (默认1)"},
+      {"name": "keyword", "type": "string", "required": false, "desc": "按角色名称模糊搜索"}
+    ],
+    "response": {
+      "data.total": "integer",
+      "data.results[]": "WsGroup — id, group_name, group_desc, created_at"
+    }
+  },
+  "role.create": {
+    "method": "POST",
+    "path": "/ws-groups",
+    "auth_required": true,
+    "user_id_required": true,
+    "description": "创建角色。group_name 在 workspace 内必须唯一",
+    "body": [
+      {"name": "group_name", "type": "string", "required": true, "desc": "角色名称 (唯一)"},
+      {"name": "group_desc", "type": "string", "required": false, "desc": "角色描述"}
+    ],
+    "response": {
+      "data": "WsGroup — id, group_name, group_desc, created_at"
+    }
+  },
+  "role.update": {
+    "method": "PATCH",
+    "path": "/ws-groups/{id}",
+    "auth_required": true,
+    "user_id_required": true,
+    "description": "更新角色基础信息（不影响成员关系）",
+    "params": [
+      {"name": "id", "type": "integer", "required": true, "desc": "角色 ID"}
+    ],
+    "body": [
+      {"name": "group_name", "type": "string", "required": false, "desc": "新名称"},
+      {"name": "group_desc", "type": "string", "required": false, "desc": "新描述"}
+    ],
+    "response": {
+      "data": "WsGroup — id, group_name, group_desc, created_at"
+    }
+  },
+  "role.delete": {
+    "method": "DELETE",
+    "path": "/ws-groups/{id}",
+    "auth_required": true,
+    "user_id_required": true,
+    "description": "删除角色。成员关系自动解除",
+    "params": [
+      {"name": "id", "type": "integer", "required": true, "desc": "角色 ID"}
+    ]
+  },
+  "role.members-add": {
+    "method": "POST",
+    "path": "/ws-groups/{id}/members",
+    "auth_required": true,
+    "user_id_required": true,
+    "description": "通过 open_id 批量添加成员到角色（幂等）",
+    "params": [
+      {"name": "id", "type": "integer", "required": true, "desc": "角色 ID"}
+    ],
+    "body": [
+      {"name": "open_ids", "type": "array[string]", "required": true, "desc": "成员 open_id 列表"}
+    ]
+  },
+  "role.members-remove": {
+    "method": "DELETE",
+    "path": "/ws-groups/{id}/members/{open_id}",
+    "auth_required": true,
+    "user_id_required": true,
+    "description": "通过 open_id 从角色中移除单个成员（幂等）",
+    "params": [
+      {"name": "id", "type": "integer", "required": true, "desc": "角色 ID"},
+      {"name": "open_id", "type": "string", "required": true, "desc": "成员 open_id"}
+    ]
+  },
+
+  "base.permission-list": {
+    "method": "GET",
+    "path": "/data/table/{table_key}/permissions",
+    "auth_required": true,
+    "user_id_required": true,
+    "description": "获取表中已配置的全部权限策略",
+    "params": [
+      {"name": "table_key", "type": "string", "required": true, "desc": "数据表 key"}
+    ],
+    "response": {
+      "data[]": "PermissionStrategy — role_key, description, audience, data_range, conditions, column_permissions, allow_create/delete/schema_update/schema_delete"
+    }
+  },
+  "base.permission-create": {
+    "method": "POST",
+    "path": "/data/table/{table_key}/permissions",
+    "auth_required": true,
+    "user_id_required": true,
+    "description": "为指定表创建权限策略，role_key 由后端自动生成",
+    "params": [
+      {"name": "table_key", "type": "string", "required": true, "desc": "数据表 key"}
+    ],
+    "body": [
+      {"name": "description", "type": "string", "required": false, "desc": "策略描述"},
+      {"name": "audience", "type": "object", "required": true, "desc": "受众: {type, user_open_ids?, group_ids?}"},
+      {"name": "data_range", "type": "string", "required": false, "desc": "数据范围: all"},
+      {"name": "conditions", "type": "array", "required": false, "desc": "过滤条件"},
+      {"name": "column_permissions", "type": "object", "required": false, "desc": "列权限映射: {column_key: editable|visible|hidden}"},
+      {"name": "allow_create", "type": "boolean", "required": false, "desc": "允许新增记录"},
+      {"name": "allow_delete", "type": "boolean", "required": false, "desc": "允许删除记录"},
+      {"name": "allow_schema_update", "type": "boolean", "required": false, "desc": "允许修改表结构"},
+      {"name": "allow_schema_delete", "type": "boolean", "required": false, "desc": "允许删除表结构"}
+    ],
+    "response": {
+      "data": "PermissionStrategy"
+    }
+  },
+  "base.permission-update": {
+    "method": "PUT",
+    "path": "/data/table/{table_key}/permissions/{role_key}",
+    "auth_required": true,
+    "user_id_required": true,
+    "description": "整策略覆盖更新。跨表保护：若该 role 同时命中其他表，拒绝更新 (4209)",
+    "params": [
+      {"name": "table_key", "type": "string", "required": true, "desc": "数据表 key"},
+      {"name": "role_key", "type": "string", "required": true, "desc": "策略 ID"}
+    ],
+    "body": [
+      {"name": "description", "type": "string", "required": false, "desc": "策略描述"},
+      {"name": "audience", "type": "object", "required": false, "desc": "受众"},
+      {"name": "data_range", "type": "string", "required": false, "desc": "数据范围"},
+      {"name": "column_permissions", "type": "object", "required": false, "desc": "列权限映射"},
+      {"name": "allow_create", "type": "boolean", "required": false},
+      {"name": "allow_delete", "type": "boolean", "required": false},
+      {"name": "allow_schema_update", "type": "boolean", "required": false},
+      {"name": "allow_schema_delete", "type": "boolean", "required": false}
+    ],
+    "response": {
+      "data": "PermissionStrategy"
+    }
+  },
+  "base.permission-delete": {
+    "method": "DELETE",
+    "path": "/data/table/{table_key}/permissions/{role_key}",
+    "auth_required": true,
+    "user_id_required": true,
+    "description": "物理删除权限策略。跨表保护：若该 role 同时命中其他表，拒绝删除 (4209)",
+    "params": [
+      {"name": "table_key", "type": "string", "required": true, "desc": "数据表 key"},
+      {"name": "role_key", "type": "string", "required": true, "desc": "策略 ID"}
+    ],
+    "response": {
+      "data.role_key": "string",
+      "data.deleted": "boolean"
+    }
   }
 }

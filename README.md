@@ -1187,7 +1187,100 @@ emoo base table-get                        获取表详情
 emoo base column-add -n <name> -t <type>   添加列
 emoo base column-update                    更新列
 emoo base column-delete                    删除列
+emoo base permission list                  表权限策略管理
+
+emoo agent list                            Agent 列表
+emoo agent create -n <name> -t <type>     创建 Agent
+emoo agent get <key>                      Agent 详情
+emoo agent update <key>                   更新 Agent
+emoo agent delete <key>                   删除 Agent
+
+emoo role list                            角色列表
+emoo role create -n <name>                创建角色
+emoo role update <id>                     更新角色
+emoo role delete <id>                     删除角色
+emoo role members-add <id> <open_id...>   批量添加成员
+emoo role members-remove <id> <open_id>   移除成员
 ```
+
+### Agent 管理 (v0.1.7+)
+
+管理 EMOO 第三方集成 Agent（webhook/dify/coze/timus）。
+
+```bash
+# 列出所有 Agent
+emoo agent list [--page-size 20] [--agent-type webhook]
+
+# 创建 Agent
+emoo agent create -n "我的助手" -t webhook -c '{"webhook_url":"https://...","auth_type":"none"}'
+emoo agent create -n "Dify助手" -t dify -c '{"base_url":"https://api.dify.ai","api_key":"sk-xxx"}'
+emoo agent create -n "Coze助手" -t coze -c '{"base_url":"https://api.coze.com","access_token":"xxx","bot_id":"123"}'
+emoo agent create -n "Timus助手" -t timus -c '{"base_url":"https://...","access_token":"xxx","agentCode":"a-001"}'
+
+# 查看/更新/删除
+emoo agent get <ws_agent_key>
+emoo agent update <ws_agent_key> --title "新名称"
+emoo agent update <ws_agent_key> --enabled   # 启用
+emoo agent update <ws_agent_key> --disabled  # 禁用
+emoo agent delete <ws_agent_key> -f          # 强制删除（跳过确认）
+```
+
+Agent 配置按 `agent_type` 有不同结构：
+
+| 类型 | 必填字段 | 可选字段 |
+|------|----------|----------|
+| webhook | `webhook_url` | `auth_type`, `bearer_token`, `custom_headers`, `response_mode`, `timeout`, `chat_history_enabled`, `chat_history_count` |
+| dify | `base_url`, `api_key` | `file_upload_method` |
+| coze | `base_url`, `access_token`, `bot_id` | `file_extract_method` |
+| timus | `base_url`, `access_token`, `agentCode` | — |
+
+### 角色管理 (v0.1.7+)
+
+管理工作区角色（群组）及成员关系。
+
+```bash
+# 列出所有角色
+emoo role list [--page-size 20] [--keyword "技术"]
+
+# 创建/更新/删除角色
+emoo role create -n "技术部" -d "技术团队"
+emoo role update 1 --name "技术一部"
+emoo role delete 1 -f
+
+# 成员管理
+emoo role members-add 1 open_xxx open_yyy
+emoo role members-add 1 --file members.txt    # 从文件读取 open_id（每行一个）
+emoo role members-remove 1 open_xxx
+```
+
+### 表权限管理 (v0.1.7+)
+
+管理 Base 数据表的权限策略。
+
+```bash
+# 查看权限
+emoo base permission list --table-key tb_xxx
+emoo base permission list --table-name "我的表"
+
+# 创建权限策略
+emoo base permission create --table-name "我的表" \
+  -d "所有人可编辑" \
+  --audience-type all \
+  --column-perms '{"fld_name":"editable","fld_age":"visible"}'
+
+# 指定受众
+emoo base permission create --table-key tb_xxx \
+  --audience-type specified \
+  --user-open-ids "open_aaa,open_bbb" \
+  --group-ids "1,2" \
+  --allow-create --no-delete
+
+# 更新/删除
+emoo base permission update <role_key> --table-key tb_xxx --allow-create --no-delete
+emoo base permission delete <role_key> --table-key tb_xxx -f
+```
+
+> **注意**: Agent/Role/Permission API 支持 `--dry-run` 预览请求，更新和删除操作均为幂等。
 
 ---
 

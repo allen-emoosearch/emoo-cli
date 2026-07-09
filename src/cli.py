@@ -6,7 +6,7 @@ from importlib.metadata import version as _pkg_version
 
 import click
 
-from .commands import auth, contact, data, chat, message, base, app, skill
+from .commands import auth, contact, data, chat, message, base, app, skill, agent, role
 from .commands.api import api
 from .commands.schema_cmd import schema
 from .errors import EmooError, set_json_mode
@@ -20,6 +20,9 @@ EPILOG = """\b
   emoo skill init                       初始化 + 注册到 Claude Code
   emoo data search -k "关键词"           搜索数据
   emoo chat send -q "你好"              发送对话
+  emoo agent list                       Agent 管理 (创建/更新/删除)
+  emoo role list                        角色管理 (创建/更新/成员)
+  emoo base permission list             表权限策略管理
 
 更多帮助: emoo <command> --help
 """
@@ -76,5 +79,7 @@ cli.add_command(message.message)
 cli.add_command(base.base)
 cli.add_command(app.app)
 cli.add_command(skill.skill)
+cli.add_command(agent.agent_group)
+cli.add_command(role.role_group)
 cli.add_command(api)
 cli.add_command(schema)

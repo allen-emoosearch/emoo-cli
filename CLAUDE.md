@@ -85,6 +85,23 @@ emoo base table-get [--table-key <key>]
 emoo base column-add [--table-key <key>] -n <name> -t <type> [--options]
 emoo base column-update [--table-key <key>] [--column-key <key>]
 emoo base column-delete [--table-key <key>] [--column-key <key>]
+emoo base permission list --table-key <key>           # 查看表权限策略
+emoo base permission create --table-key <key> -d "策略描述"
+emoo base permission update <role_key> --table-key <key>
+emoo base permission delete <role_key> --table-key <key> -f
+
+emoo agent list [--page-size 20] [--agent-type webhook]   # Agent 列表
+emoo agent create -n <name> -t <type> -c '<config-json>'   # 创建 Agent
+emoo agent get <ws_agent_key>                              # Agent 详情
+emoo agent update <ws_agent_key> --title <new>             # 更新 Agent
+emoo agent delete <ws_agent_key> -f                        # 删除 Agent
+
+emoo role list [--page-size 20] [--keyword <kw>]           # 角色列表
+emoo role create -n <name> [-d <desc>]                     # 创建角色
+emoo role update <id> [--name <new>] [--desc <new>]        # 更新角色
+emoo role delete <id> -f                                   # 删除角色
+emoo role members-add <id> <open_id...>                    # 批量添加成员
+emoo role members-remove <id> <open_id>                    # 移除成员
 
 ## Base 字段类型写入格式
 
@@ -239,14 +256,16 @@ src/
     auth.py                 # auth login / status / set-default-user-id / set-base-url
     api.py                  # L3 passthrough (GET/POST/PUT/DELETE)
     schema_cmd.py           # schema list / <endpoint> introspection
-    endpoints.json          # 24 endpoint schemas (method, path, params, body, response)
+    endpoints.json          # 39 endpoint schemas (method, path, params, body, response)
     data.py                 # data search / get
     chat.py                 # chat list / create / send (with --dry-run)
     message.py              # message push (with --dry-run)
     contact.py              # contact list / update
     app.py                  # app overview / list / doc-groups
     skill.py                # skill init/list/show/run/create/register + pipeline sub-group
-    base.py                 # base record/table/column CRUD (13 commands)
+    base.py                 # base record/table/column/permission CRUD (17 commands)
+    agent.py                # agent list/create/get/update/delete (5 commands)
+    role.py                 # role list/create/update/delete + members-add/remove (6 commands)
   skills/
     loader.py               # MD skill parser (YAML frontmatter)
     runner.py               # Skill executor (template → app resolve → search → CSV)

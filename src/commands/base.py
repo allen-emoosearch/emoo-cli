@@ -521,3 +521,223 @@ def column_delete(ctx, table_key, table_name, column_key, column_name):
     client = EmooClient(base_url=ctx.obj.get("base_url"), user_id=ctx.obj.get("user_id"))
     resp = client.delete("/data/table/columns", body=body)
     success(resp, as_json=ctx.obj.get("as_json", False))
+
+
+# ──────────────────────────── 表权限管理 ────────────────────────────
+
+
+def _resolve_table_key(client: EmooClient, table_key: str | None, table_name: str | None) -> str:
+    """根据 table_key 或 table_name 解析出真实的 table_key。"""
+    if table_key:
+        return table_key
+    # 通过 table_name 查 table_key
+    resp = client.request("GET", "/data/table", params={"page_size": "200", "current_page": "1"})
+    tables = resp.get("data", {}).get("results", [])
+    for t in tables:
+        if t.get("table_name") == table_name:
+            return t["table_key"]
+    raise click.BadParameter(f"未找到表: {table_name}")
+
+
+@base.group(name="permission", help="表权限策略管理")
+def permission_group() -> None:
+    pass
+
+
+@permission_group.command("list")
+@click.option("--table-key", default=None, help="表标识 (与 --table-name 二选一)")
+@click.option("--table-name", default=None, help="表名称 (与 --table-key 二选一)")
+@click.option("--json", "as_json", is_flag=True)
+@click.pass_context
+def permission_list(ctx: click.Context, table_key: str | None, table_name: str | None, as_json: bool) -> None:
+    """获取指定表的所有权限策略。"""
+    client = EmooClient(base_url=ctx.obj.get("base_url"), user_id=ctx.obj.get("user_id"))
+    tk = _resolve_table_key(client, table_key, table_name)
+    resp = client.request("GET", f"/data/table/{tk}/permissions")
+    data = resp.get("data", [])
+
+    if as_json:
+        _progress(f"共 {len(data)} 条权限策略")
+        click.echo(client._format_json(resp))
+        return
+
+    if not data:
+        click.echo("该表暂无权限策略")
+        return
+
+    from rich.table import Table
+    table = Table(title=f"表权限策略 (table_key={tk})")
+    table.add_column("role_key", style="cyan")
+    table.add_column("描述")
+    table.add_column("受众")
+    table.add_column("数据范围")
+    table.add_column("允许增")
+    table.add_column("允许删")
+    table.add_column("允许改表")
+
+    for p in data:
+        audience = p.get("audience", {})
+        aud_type = audience.get("type", "")
+        if aud_type == "all":
+            aud_label = "所有人"
+        elif aud_type == "specified":
+            aud_label = f"指定成员({len(audience.get('user_open_ids', []))}人)"
+        else:
+            aud_label = str(aud_type)
+        table.add_row(
+            p.get("role_key", ""),
+            p.get("description", ""),
+            aud_label,
+            p.get("data_range", ""),
+            "✅" if p.get("allow_create") else "❌",
+            "✅" if p.get("allow_delete") else "❌",
+            "✅" if p.get("allow_schema_update") else "❌",
+        )
+
+    from rich.console import Console
+    Console().print(table)
+
+
+@permission_group.command("create")
+@click.option("--table-key", default=None, help="表标识 (与 --table-name 二选一)")
+@click.option("--table-name", default=None, help="表名称 (与 --table-key 二选一)")
+@click.option("--desc", "-d", default="", type=str, help="策略描述")
+@click.option("--audience-type", default="all", type=str, help="受众类型: all / specified")
+@click.option("--user-open-ids", default=None, type=str, help="受众 open_id，逗号分隔 (audience-type=specified 时)")
+@click.option("--group-ids", default=None, type=str, help="受众角色 ID，逗号分隔 (audience-type=specified 时)")
+@click.option("--data-range", default="all", type=str, help="数据范围: all")
+@click.option("--column-perms", default=None, type=str,
+              help="列权限 JSON: {\"column_key\":\"editable\", ...}")
+@click.option("--allow-create/--no-create", default=True)
+@click.option("--allow-delete/--no-delete", default=False)
+@click.option("--allow-schema-update/--no-schema-update", default=False)
+@click.option("--allow-schema-delete/--no-schema-delete", default=False)
+@click.option("--json", "as_json", is_flag=True)
+@click.option("--dry-run", is_flag=True)
+@click.pass_context
+def permission_create(ctx: click.Context, table_key: str | None, table_name: str | None,
+                      desc: str, audience_type: str, user_open_ids: str | None,
+                      group_ids: str | None, data_range: str, column_perms: str | None,
+                      allow_create: bool, allow_delete: bool, allow_schema_update: bool,
+                      allow_schema_delete: bool, as_json: bool, dry_run: bool) -> None:
+    """为指定表创建一条权限策略。"""
+    import json as _json
+    client = EmooClient(base_url=ctx.obj.get("base_url"), user_id=ctx.obj.get("user_id"))
+    tk = _resolve_table_key(client, table_key, table_name)
+
+    audience: dict = {"type": audience_type}
+    if audience_type == "specified" and (user_open_ids or group_ids):
+        if user_open_ids:
+            audience["user_open_ids"] = [x.strip() for x in user_open_ids.split(",")]
+        if group_ids:
+            audience["group_ids"] = [int(x.strip()) for x in group_ids.split(",")]
+
+    body: dict = {
+        "description": desc,
+        "audience": audience,
+        "data_range": data_range,
+        "conditions": [],
+        "column_permissions": _json.loads(column_perms) if column_perms else {},
+        "allow_create": allow_create,
+        "allow_delete": allow_delete,
+        "allow_schema_update": allow_schema_update,
+        "allow_schema_delete": allow_schema_delete,
+    }
+
+    if dry_run:
+        click.echo(f"DRY-RUN POST /data/table/{tk}/permissions")
+        click.echo(f"  Body:\n{_json.dumps(body, indent=2, ensure_ascii=False)}")
+        return
+
+    resp = client.request("POST", f"/data/table/{tk}/permissions", body=body)
+    success(resp, as_json=as_json)
+
+
+@permission_group.command("update")
+@click.argument("role_key", type=str)
+@click.option("--table-key", default=None, help="表标识 (与 --table-name 二选一)")
+@click.option("--table-name", default=None, help="表名称 (与 --table-key 二选一)")
+@click.option("--desc", "-d", default=None, type=str, help="策略描述")
+@click.option("--audience-type", default=None, type=str, help="受众类型: all / specified")
+@click.option("--user-open-ids", default=None, type=str, help="受众 open_id，逗号分隔")
+@click.option("--group-ids", default=None, type=str, help="受众角色 ID，逗号分隔")
+@click.option("--data-range", default=None, type=str, help="数据范围")
+@click.option("--column-perms", default=None, type=str, help="列权限 JSON")
+@click.option("--allow-create/--no-create", default=None)
+@click.option("--allow-delete/--no-delete", default=None)
+@click.option("--allow-schema-update/--no-schema-update", default=None)
+@click.option("--allow-schema-delete/--no-schema-delete", default=None)
+@click.option("--json", "as_json", is_flag=True)
+@click.option("--dry-run", is_flag=True)
+@click.pass_context
+def permission_update(ctx: click.Context, role_key: str, table_key: str | None, table_name: str | None,
+                      desc: str | None, audience_type: str | None, user_open_ids: str | None,
+                      group_ids: str | None, data_range: str | None, column_perms: str | None,
+                      allow_create: bool | None, allow_delete: bool | None,
+                      allow_schema_update: bool | None, allow_schema_delete: bool | None,
+                      as_json: bool, dry_run: bool) -> None:
+    """更新权限策略（整策略覆盖）。"""
+    import json as _json
+    client = EmooClient(base_url=ctx.obj.get("base_url"), user_id=ctx.obj.get("user_id"))
+    tk = _resolve_table_key(client, table_key, table_name)
+
+    body: dict = {}
+    if desc is not None:
+        body["description"] = desc
+    if audience_type is not None:
+        audience: dict = {"type": audience_type}
+        if audience_type == "specified" and (user_open_ids or group_ids):
+            if user_open_ids:
+                audience["user_open_ids"] = [x.strip() for x in user_open_ids.split(",")]
+            if group_ids:
+                audience["group_ids"] = [int(x.strip()) for x in group_ids.split(",")]
+        body["audience"] = audience
+    if data_range is not None:
+        body["data_range"] = data_range
+    if column_perms is not None:
+        body["column_permissions"] = _json.loads(column_perms)
+    if allow_create is not None:
+        body["allow_create"] = allow_create
+    if allow_delete is not None:
+        body["allow_delete"] = allow_delete
+    if allow_schema_update is not None:
+        body["allow_schema_update"] = allow_schema_update
+    if allow_schema_delete is not None:
+        body["allow_schema_delete"] = allow_schema_delete
+
+    if not body:
+        click.echo("⚠ 未指定任何要更新的字段")
+        return
+
+    if dry_run:
+        click.echo(f"DRY-RUN PUT /data/table/{tk}/permissions/{role_key}")
+        click.echo(f"  Body:\n{_json.dumps(body, indent=2, ensure_ascii=False)}")
+        return
+
+    resp = client.request("PUT", f"/data/table/{tk}/permissions/{role_key}", body=body)
+    success(resp, as_json=as_json)
+
+
+@permission_group.command("delete")
+@click.argument("role_key", type=str)
+@click.option("--table-key", default=None, help="表标识 (与 --table-name 二选一)")
+@click.option("--table-name", default=None, help="表名称 (与 --table-key 二选一)")
+@click.option("--force", "-f", is_flag=True, help="跳过确认")
+@click.option("--json", "as_json", is_flag=True)
+@click.option("--dry-run", is_flag=True)
+@click.pass_context
+def permission_delete(ctx: click.Context, role_key: str, table_key: str | None, table_name: str | None,
+                      force: bool, as_json: bool, dry_run: bool) -> None:
+    """删除权限策略。"""
+    if not force and not dry_run:
+        click.confirm(f"确认删除权限策略 '{role_key}'？此操作不可逆", abort=True)
+
+    client = EmooClient(base_url=ctx.obj.get("base_url"), user_id=ctx.obj.get("user_id"))
+    tk = _resolve_table_key(client, table_key, table_name)
+
+    if dry_run:
+        click.echo(f"DRY-RUN DELETE /data/table/{tk}/permissions/{role_key}")
+        return
+
+    resp = client.request("DELETE", f"/data/table/{tk}/permissions/{role_key}")
+    success(resp, as_json=as_json)
