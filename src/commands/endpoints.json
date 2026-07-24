@@ -668,7 +668,7 @@
       {"name": "files", "type": "array[object]", "required": true, "desc": "1-20 个: [{file_key, file_name, file_size, mime_type?}]"}
     ],
     "response": {
-      "data[]": "文件记录: file_key, download_url (24h 有效)"
+      "data[]": "FileConfirmResult: file_key, url (24h 有效下载链接)"
     }
   },
   "file.download-url": {
@@ -681,7 +681,7 @@
       {"name": "file_key", "type": "string", "required": true, "desc": "文件 file_key"}
     ],
     "response": {
-      "data.download_url": "string (24h 有效)"
+      "data.url": "string (24h 有效下载链接)"
     }
   }
 }
