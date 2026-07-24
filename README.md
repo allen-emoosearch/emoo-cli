@@ -577,6 +577,13 @@ emoo base record-list --table-name "线上线索" \
 emoo base record-list --table-name "线上线索" --page-size 10 --current-page 2
 ```
 
+base 还包含表/列/权限管理子命令（详见下文 [命令速查](#命令速查) 及各 v0.1.7+ 章节）：
+
+- **表管理**: `table-create` / `table-list` / `table-update` / `table-delete` / `table-get`
+  - `table-get` 走 `/data/table/detail` 直查接口，返回完整列定义（`columns[]`），支持 `--table-key` 或 `--table-name`
+- **列管理**: `column-add` / `column-update` / `column-delete`（支持 11 种类型）
+- **表权限管理**: `base permission list/create/update/delete`（详见 [表权限管理](#表权限管理-v018) 章节）
+
 ---
 
 ### app — 应用与文档组管理
@@ -1201,6 +1208,15 @@ emoo role update <id>                     更新角色
 emoo role delete <id>                     删除角色
 emoo role members-add <id> <open_id...>   批量添加成员
 emoo role members-remove <id> <open_id>   移除成员
+
+emoo folder list [--folder-id <id>]       列出 folder 内容 (混合 folder/table/doc)
+emoo folder create -n <name>              创建 folder (限超管)
+emoo folder update -f <id> --name <new>   改名/移动 folder
+emoo folder delete -f <id>                删除 folder (子孙级联)
+
+emoo file credentials -f '<files-json>'   获取上传凭证 + file_key
+emoo file confirm -f '<files-json>'       确认上传完成 → 24h 下载链接
+emoo file download-url <file_key>         获取下载链接 (24h)
 ```
 
 ### Agent 管理 (v0.1.7+)
@@ -1280,7 +1296,49 @@ emoo base permission update <role_key> --table-key tb_xxx --allow-create --no-de
 emoo base permission delete <role_key> --table-key tb_xxx -f
 ```
 
-> **注意**: Agent/Role/Permission API 支持 `--dry-run` 预览请求，更新和删除操作均为幂等。
+> **注意**: Agent/Role/Permission/Folder/File 命令需要传 `--user-id <open_id>`（可用 `emoo contact list` 获取），均支持 `--dry-run` 预览请求，删除操作在 `--json` 模式下自动跳过交互确认。
+
+### 文件夹管理 (v0.1.8+)
+
+管理知识库文件夹结构（限 workspace 超管；list 所有成员可用）。
+
+```bash
+# 列出 folder 直接 children（混合 folder + table + document，不递归）
+emoo folder list                     # 列根级
+emoo folder list --folder-id 12      # 列指定 folder 的直接 children
+
+# 创建 folder（同 parent 下名称唯一，≤200 字符）
+emoo folder create -n "客户管理"
+emoo folder create -n "VIP" --parent-id 12   # 在 folder 12 下创建子 folder
+
+# 更新 folder（改名 / 移动，二选一或都传）
+emoo folder update -f 13 --name "VIP 客户"   # 改名
+emoo folder update -f 13 --parent-id 20      # 移动到 folder 20 下
+emoo folder update -f 13 --to-root           # 移到根 folder
+
+# 删除 folder（子孙级联删除，下属 table/document 上浮到祖父，不删业务数据）
+emoo folder delete -f 13 -f
+```
+
+### 文件管理 (v0.1.8+)
+
+文件上传/下载全流程：获取凭证 → 客户端直传对象存储 → 确认 → 获取下载链接。
+
+```bash
+# 1. 获取上传凭证（1-20 个文件，每个 ≤100MB，凭证 1h 过期）
+#    返回 file_key + upload 指令（method=PUT 直传二进制 / method=POST multipart）
+emoo file credentials -f '[{"file_name":"report.pdf","file_size":102400,"mime_type":"application/pdf"}]'
+
+# 2. 客户端按 upload 指令直传到对象存储（PUT 二进制 或 POST multipart 表单）
+
+# 3. 确认上传完成，创建文件元数据记录，返回 24h 下载链接
+emoo file confirm -f '[{"file_key":"<上一步的file_key>","file_name":"report.pdf","file_size":102400}]'
+
+# 4. 获取下载链接（24h 有效，confirm 返回的链接过期后用此刷新）
+emoo file download-url <file_key>
+```
+
+> upload 指令的 `method=POST` 时，需按 `form_fields` 构造 multipart 表单，文件字段名见 `file_field`（默认 `file`）。
 
 ---
 
