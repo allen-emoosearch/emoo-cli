@@ -95,6 +95,7 @@ emoo base record-list --table-name "表名" --max-results 500     # 自动翻页
 
 # 表管理
 emoo base table-list / table-get / table-create / table-update / table-delete
+# table-get 走 /data/table/detail 直查, 返回完整列定义
 
 # 字段管理 (支持 11 种类型: string/number/boolean/date/time/datetime/reference/file/user/group/select)
 emoo base column-add / column-update / column-delete

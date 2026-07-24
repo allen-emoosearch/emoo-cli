@@ -392,29 +392,17 @@ def table_delete(ctx, table_key, table_name):
 @click.option("--table-name", default=None, help="表名称 (与 --table-key 二选一)")
 @click.pass_context
 def table_get(ctx, table_key, table_name):
-    """获取表详情（当前通过列表 + 客户端过滤，后续 API 支持直查后切换）。"""
+    """获取表详情（含完整列定义），通过 table_key 或 table_name 定位。"""
     _ensure_table(table_key, table_name)
 
     client = EmooClient(base_url=ctx.obj.get("base_url"), user_id=ctx.obj.get("user_id"))
-    # 当前 API 的 GET /data/table 不支持 query 过滤，拉全量后客户端匹配
-    resp = client.get("/data/table", params={"page_size": 100})
-    results = resp.get("data", {}).get("results", [])
-
-    match = None
-    for t in results:
-        if table_key and t.get("table_key") == table_key:
-            match = t
-            break
-        if table_name and t.get("table_name") == table_name:
-            match = t
-            break
-
-    if not match:
-        identifier = table_key or table_name
-        click.echo(f"未找到表: {identifier}", err=True)
-        ctx.exit(1)
-
-    resp["data"] = match
+    # 新接口 /data/table/detail 支持直查并返回完整列定义
+    params: dict = {}
+    if table_key:
+        params["table_key"] = table_key
+    else:
+        params["table_name"] = table_name
+    resp = client.get("/data/table/detail", params=params)
     output(resp, as_json=ctx.obj.get("as_json", False))
 
 
@@ -530,13 +518,12 @@ def _resolve_table_key(client: EmooClient, table_key: str | None, table_name: st
     """根据 table_key 或 table_name 解析出真实的 table_key。"""
     if table_key:
         return table_key
-    # 通过 table_name 查 table_key
-    resp = client.request("GET", "/data/table", params={"page_size": "200", "current_page": "1"})
-    tables = resp.get("data", {}).get("results", [])
-    for t in tables:
-        if t.get("table_name") == table_name:
-            return t["table_key"]
-    raise click.BadParameter(f"未找到表: {table_name}")
+    # 通过 /data/table/detail 直查 table_name → table_key
+    resp = client.request("GET", "/data/table/detail", params={"table_name": table_name})
+    tk = resp.get("data", {}).get("table_key")
+    if not tk:
+        raise click.BadParameter(f"未找到表: {table_name}")
+    return tk
 
 
 @base.group(name="permission", help="表权限策略管理")
