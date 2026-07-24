@@ -1213,8 +1213,8 @@ emoo agent list [--page-size 20] [--agent-type webhook]
 
 # 创建 Agent
 emoo agent create -n "我的助手" -t webhook -c '{"webhook_url":"https://...","auth_type":"none"}'
-emoo agent create -n "Dify助手" -t dify -c '{"base_url":"https://api.dify.ai","api_key":"sk-xxx"}'
-emoo agent create -n "Coze助手" -t coze -c '{"base_url":"https://api.coze.com","access_token":"xxx","bot_id":"123"}'
+emoo agent create -n "Dify助手" -t dify -c '{"base_url":"https://api.dify.ai","api_key":"sk-xxx","file_upload_method":"upload_to_dify"}'
+emoo agent create -n "Coze助手" -t coze -c '{"base_url":"https://api.coze.com","access_token":"xxx","bot_id":"123","file_extract_method":"extract_in_coze"}'
 emoo agent create -n "Timus助手" -t timus -c '{"base_url":"https://...","access_token":"xxx","agentCode":"a-001"}'
 
 # 查看/更新/删除
@@ -1229,9 +1229,9 @@ Agent 配置按 `agent_type` 有不同结构：
 
 | 类型 | 必填字段 | 可选字段 |
 |------|----------|----------|
-| webhook | `webhook_url` | `auth_type`, `bearer_token`, `custom_headers`, `response_mode`, `timeout`, `chat_history_enabled`, `chat_history_count` |
-| dify | `base_url`, `api_key` | `file_upload_method` |
-| coze | `base_url`, `access_token`, `bot_id` | `file_extract_method` |
+| webhook | `webhook_url` | `auth_type`, `bearer_token`, `custom_headers`, `response_mode`, `timeout`, `chat_history_enabled`, `chat_history_count`, `file_delivery_method` |
+| dify | `base_url`, `api_key`, `file_upload_method` (`upload_to_dify`/`upload_to_emoo`) | — |
+| coze | `base_url`, `access_token`, `bot_id`, `file_extract_method` (`extract_in_coze`/`extract_in_emoo`) | — |
 | timus | `base_url`, `access_token`, `agentCode` | — |
 
 ### 角色管理 (v0.1.7+)

@@ -122,8 +122,8 @@ emoo agent delete <key> -f                          # 删除 Agent
 
 # 不同 agent_type 的 config 示例:
 # webhook: {"webhook_url":"https://...","auth_type":"none","response_mode":"json"}
-# dify:    {"base_url":"https://api.dify.ai","api_key":"sk-xxx"}
-# coze:    {"base_url":"https://api.coze.com","access_token":"xxx","bot_id":"123"}
+# dify:    {"base_url":"https://api.dify.ai","api_key":"sk-xxx","file_upload_method":"upload_to_dify"}
+# coze:    {"base_url":"https://api.coze.com","access_token":"xxx","bot_id":"123","file_extract_method":"extract_in_coze"}
 # timus:   {"base_url":"https://...","access_token":"xxx","agentCode":"a-001"}
 ```
 
