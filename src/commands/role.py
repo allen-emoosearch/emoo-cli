@@ -118,7 +118,7 @@ def role_update(ctx: click.Context, role_id: int, name: str | None, desc: str | 
 @click.pass_context
 def role_delete(ctx: click.Context, role_id: int, force: bool, dry_run: bool) -> None:
     """删除角色。"""
-    if not force and not dry_run:
+    if not force and not dry_run and not ctx.obj.get("as_json"):
         click.confirm(f"确认删除角色 ID={role_id}？成员关系自动解除", abort=True)
 
     if dry_run:

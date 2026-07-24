@@ -183,7 +183,7 @@ def agent_update(ctx: click.Context, ws_agent_key: str, title: str | None, confi
 @click.pass_context
 def agent_delete(ctx: click.Context, ws_agent_key: str, force: bool, dry_run: bool) -> None:
     """删除 Agent。"""
-    if not force and not dry_run:
+    if not force and not dry_run and not ctx.obj.get("as_json"):
         click.confirm(f"确认删除 Agent '{ws_agent_key}'？此操作不可逆", abort=True)
 
     if dry_run:

@@ -6,7 +6,7 @@ from importlib.metadata import version as _pkg_version
 
 import click
 
-from .commands import auth, contact, data, chat, message, base, app, skill, agent, role
+from .commands import auth, contact, data, chat, message, base, app, skill, agent, role, folder, file
 from .commands.api import api
 from .commands.schema_cmd import schema
 from .errors import EmooError, set_json_mode
@@ -81,5 +81,7 @@ cli.add_command(app.app)
 cli.add_command(skill.skill)
 cli.add_command(agent.agent_group)
 cli.add_command(role.role_group)
+cli.add_command(folder.folder_group)
+cli.add_command(file.file_group)
 cli.add_command(api)
 cli.add_command(schema)

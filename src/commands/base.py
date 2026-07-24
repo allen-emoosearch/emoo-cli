@@ -754,7 +754,7 @@ def permission_update(ctx: click.Context, role_key: str, table_key: str | None, 
 def permission_delete(ctx: click.Context, role_key: str, table_key: str | None, table_name: str | None,
                       force: bool, dry_run: bool) -> None:
     """删除权限策略。"""
-    if not force and not dry_run:
+    if not force and not dry_run and not ctx.obj.get("as_json"):
         click.confirm(f"确认删除权限策略 '{role_key}'？此操作不可逆", abort=True)
 
     client = EmooClient(base_url=ctx.obj.get("base_url"), user_id=ctx.obj.get("user_id"))

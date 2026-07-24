@@ -144,7 +144,24 @@ emoo base permission update <role_key>         # 更新权限策略
 emoo base permission delete <role_key> -f      # 删除权限策略
 ```
 
-> **注意**: Agent/Role/Permission 命令需要传 `--user-id <open_id>`，可用 `emoo contact list` 获取。
+### 文件夹管理 (限超管)
+```bash
+emoo folder list [--folder-id <id>]            # 列出 folder 内容 (混合 folder/table/doc)
+emoo folder create -n <name> [--parent-id <p>] # 创建 folder
+emoo folder update -f <id> --name <new>        # 改名
+emoo folder update -f <id> --parent-id <p>     # 移动
+emoo folder delete -f <id>                     # 删除 (子孙级联)
+```
+
+### 文件管理
+```bash
+# 上传流程: credentials → 直传对象存储 → confirm
+emoo file credentials -f '[{"file_name":"a.pdf","file_size":1024}]'   # 取上传凭证+file_key
+emoo file confirm -f '[{"file_key":"...","file_name":"a.pdf","file_size":1024}]'  # 确认→24h下载链接
+emoo file download-url <file_key>              # 刷新下载链接 (24h)
+```
+
+> **注意**: Agent/Role/Folder/File 命令需要传 `--user-id <open_id>`，可用 `emoo contact list` 获取。
 
 ## 字段类型写入格式 (重要)
 

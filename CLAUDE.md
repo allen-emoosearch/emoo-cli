@@ -104,6 +104,15 @@ emoo role delete <id> -f                                   # 删除角色
 emoo role members-add <id> <open_id...>                    # 批量添加成员
 emoo role members-remove <id> <open_id>                    # 移除成员
 
+emoo folder list [--folder-id <id>]                        # 列出 folder 内容
+emoo folder create -n <name> [--parent-id <id>]            # 创建 folder (限超管)
+emoo folder update -f <id> [--name <new>] [--parent-id <p>]# 改名/移动
+emoo folder delete -f <id>                                 # 删除 folder (级联)
+
+emoo file credentials -f '<files-json>'                    # 获取上传凭证 (1-20个)
+emoo file confirm -f '<files-json>'                        # 确认上传完成
+emoo file download-url <file_key>                          # 获取下载链接 (24h)
+
 ## Base 字段类型写入格式
 
 | 类型 | 写入 | 示例 |
@@ -257,7 +266,7 @@ src/
     auth.py                 # auth login / status / set-default-user-id / set-base-url
     api.py                  # L3 passthrough (GET/POST/PUT/DELETE)
     schema_cmd.py           # schema list / <endpoint> introspection
-    endpoints.json          # 39 endpoint schemas (method, path, params, body, response)
+    endpoints.json          # 46 endpoint schemas (method, path, params, body, response)
     data.py                 # data search / get
     chat.py                 # chat list / create / send (with --dry-run)
     message.py              # message push (with --dry-run)
@@ -267,6 +276,8 @@ src/
     base.py                 # base record/table/column/permission CRUD (17 commands)
     agent.py                # agent list/create/get/update/delete (5 commands)
     role.py                 # role list/create/update/delete + members-add/remove (6 commands)
+    folder.py               # folder list/create/update/delete (4 commands, 限超管)
+    file.py                 # file credentials/confirm/download-url (3 commands)
   skills/
     loader.py               # MD skill parser (YAML frontmatter)
     runner.py               # Skill executor (template → app resolve → search → CSV)

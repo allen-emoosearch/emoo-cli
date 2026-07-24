@@ -590,5 +590,98 @@
       "data.role_key": "string",
       "data.deleted": "boolean"
     }
+  },
+
+  "folder.list": {
+    "method": "GET",
+    "path": "/data/folder/items",
+    "auth_required": true,
+    "user_id_required": true,
+    "description": "列出 folder 直接 children (混合 folder+table+document，不递归)。所有成员可调",
+    "params": [
+      {"name": "folder_id", "type": "integer", "required": false, "desc": "父 folder ID; 不传/null=列根级"}
+    ],
+    "response": {
+      "data.items[]": "混合项: type(folder/table/document), id, name, table_key/doc_id"
+    }
+  },
+  "folder.create": {
+    "method": "POST",
+    "path": "/data/folder",
+    "auth_required": true,
+    "user_id_required": true,
+    "description": "创建 folder (限 workspace 超管)。同 parent 下名称唯一",
+    "body": [
+      {"name": "name", "type": "string", "required": true, "desc": "folder 名称 (≤200字符, 同 parent 唯一)"},
+      {"name": "parent_id", "type": "integer", "required": false, "desc": "父 folder ID; 不传/null=根 folder"}
+    ],
+    "response": {
+      "data": "folder 对象: id, name, parent_id, table_count, created_at"
+    }
+  },
+  "folder.update": {
+    "method": "PUT",
+    "path": "/data/folder",
+    "auth_required": true,
+    "user_id_required": true,
+    "description": "更新 folder (改名/移动, 限超管)。name 或 parent_id 至少传一项; parent_id PATCH 语义",
+    "body": [
+      {"name": "folder_id", "type": "integer", "required": true, "desc": "目标 folder ID"},
+      {"name": "name", "type": "string", "required": false, "desc": "新名称 (≤200字符)"},
+      {"name": "parent_id", "type": "integer", "required": false, "desc": "不传=不改; null=移到根; int=移到目标"}
+    ],
+    "response": {
+      "data": "folder 对象"
+    }
+  },
+  "folder.delete": {
+    "method": "DELETE",
+    "path": "/data/folder",
+    "auth_required": true,
+    "user_id_required": true,
+    "description": "删除 folder (限超管)。子孙级联删除, 下属 table/document 上浮到祖父",
+    "body": [
+      {"name": "folder_id", "type": "integer", "required": true, "desc": "目标 folder ID"}
+    ]
+  },
+
+  "file.credentials": {
+    "method": "POST",
+    "path": "/data/files/upload-credentials",
+    "auth_required": true,
+    "user_id_required": true,
+    "description": "获取一批文件的上传凭证 (1-20个, 凭证 1h 过期)。返回 upload 指令 + file_key",
+    "body": [
+      {"name": "files", "type": "array[object]", "required": true, "desc": "1-20 个文件: [{file_name, file_size, mime_type?}] (file_size ≤100MB)"}
+    ],
+    "response": {
+      "data[]": "上传凭证: file_key, upload(method=PUT直传/POST multipart, url, form_fields?, file_field?)"
+    }
+  },
+  "file.confirm": {
+    "method": "POST",
+    "path": "/data/files/confirm",
+    "auth_required": true,
+    "user_id_required": true,
+    "description": "确认文件上传完成, 创建文件元数据记录, 返回 24h 下载链接",
+    "body": [
+      {"name": "files", "type": "array[object]", "required": true, "desc": "1-20 个: [{file_key, file_name, file_size, mime_type?}]"}
+    ],
+    "response": {
+      "data[]": "文件记录: file_key, download_url (24h 有效)"
+    }
+  },
+  "file.download-url": {
+    "method": "GET",
+    "path": "/data/files/download-url",
+    "auth_required": true,
+    "user_id_required": true,
+    "description": "获取文件下载链接 (24h 有效)。confirm 返回的 URL 过期后用此刷新",
+    "params": [
+      {"name": "file_key", "type": "string", "required": true, "desc": "文件 file_key"}
+    ],
+    "response": {
+      "data.download_url": "string (24h 有效)"
+    }
   }
 }
