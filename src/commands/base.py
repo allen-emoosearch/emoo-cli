@@ -547,18 +547,17 @@ def permission_group() -> None:
 @permission_group.command("list")
 @click.option("--table-key", default=None, help="表标识 (与 --table-name 二选一)")
 @click.option("--table-name", default=None, help="表名称 (与 --table-key 二选一)")
-@click.option("--json", "as_json", is_flag=True)
 @click.pass_context
-def permission_list(ctx: click.Context, table_key: str | None, table_name: str | None, as_json: bool) -> None:
+def permission_list(ctx: click.Context, table_key: str | None, table_name: str | None) -> None:
     """获取指定表的所有权限策略。"""
     client = EmooClient(base_url=ctx.obj.get("base_url"), user_id=ctx.obj.get("user_id"))
     tk = _resolve_table_key(client, table_key, table_name)
     resp = client.request("GET", f"/data/table/{tk}/permissions")
     data = resp.get("data", [])
 
-    if as_json:
-        _progress(f"共 {len(data)} 条权限策略")
-        click.echo(client._format_json(resp))
+    if ctx.obj.get("as_json"):
+        resp["data"] = data
+        output(resp, as_json=True)
         return
 
     if not data:
@@ -612,14 +611,13 @@ def permission_list(ctx: click.Context, table_key: str | None, table_name: str |
 @click.option("--allow-delete/--no-delete", default=False)
 @click.option("--allow-schema-update/--no-schema-update", default=False)
 @click.option("--allow-schema-delete/--no-schema-delete", default=False)
-@click.option("--json", "as_json", is_flag=True)
 @click.option("--dry-run", is_flag=True)
 @click.pass_context
 def permission_create(ctx: click.Context, table_key: str | None, table_name: str | None,
                       desc: str, audience_type: str, user_open_ids: str | None,
                       group_ids: str | None, data_range: str, column_perms: str | None,
                       allow_create: bool, allow_delete: bool, allow_schema_update: bool,
-                      allow_schema_delete: bool, as_json: bool, dry_run: bool) -> None:
+                      allow_schema_delete: bool, dry_run: bool) -> None:
     """为指定表创建一条权限策略。"""
     import json as _json
     client = EmooClient(base_url=ctx.obj.get("base_url"), user_id=ctx.obj.get("user_id"))
@@ -650,7 +648,7 @@ def permission_create(ctx: click.Context, table_key: str | None, table_name: str
         return
 
     resp = client.request("POST", f"/data/table/{tk}/permissions", body=body)
-    success(resp, as_json=as_json)
+    success(resp, as_json=ctx.obj.get("as_json", False))
 
 
 @permission_group.command("update")
@@ -667,7 +665,6 @@ def permission_create(ctx: click.Context, table_key: str | None, table_name: str
 @click.option("--allow-delete/--no-delete", default=None)
 @click.option("--allow-schema-update/--no-schema-update", default=None)
 @click.option("--allow-schema-delete/--no-schema-delete", default=None)
-@click.option("--json", "as_json", is_flag=True)
 @click.option("--dry-run", is_flag=True)
 @click.pass_context
 def permission_update(ctx: click.Context, role_key: str, table_key: str | None, table_name: str | None,
@@ -675,13 +672,46 @@ def permission_update(ctx: click.Context, role_key: str, table_key: str | None, 
                       group_ids: str | None, data_range: str | None, column_perms: str | None,
                       allow_create: bool | None, allow_delete: bool | None,
                       allow_schema_update: bool | None, allow_schema_delete: bool | None,
-                      as_json: bool, dry_run: bool) -> None:
-    """更新权限策略（整策略覆盖）。"""
+                      dry_run: bool) -> None:
+    """更新权限策略（整策略覆盖）。
+
+    注意：API 为整策略覆盖语义，未传的 required 字段会被置默认值。
+    为避免误清空，未指定的 audience/data_range/column_permissions 会从当前策略继承。
+    """
     import json as _json
     client = EmooClient(base_url=ctx.obj.get("base_url"), user_id=ctx.obj.get("user_id"))
     tk = _resolve_table_key(client, table_key, table_name)
 
-    body: dict = {}
+    # 整策略覆盖：先取当前策略作为基底，确保 required 字段始终存在
+    cur_resp = client.request("GET", f"/data/table/{tk}/permissions")
+    current: dict = {}
+    for p in cur_resp.get("data", []):
+        if p.get("role_key") == role_key:
+            current = p
+            break
+    if not current:
+        raise click.BadParameter(f"未找到权限策略 '{role_key}' (table={tk})")
+
+    # 服务端约束: 标题列不可设为 hidden (base_title_column_hidden_forbidden)
+    # 继承当前列权限时，自动把 hidden 的标题列提级为 visible
+    raw_col_perms = dict(current.get("column_permissions", {}))
+    fixed_col_perms = {
+        k: ("visible" if v == "hidden" else v)
+        for k, v in raw_col_perms.items()
+    } if raw_col_perms else {}
+
+    body: dict = {
+        "description": current.get("description", ""),
+        "audience": current.get("audience", {"type": "all"}),
+        "data_range": current.get("data_range", "all"),
+        "conditions": current.get("conditions", []),
+        "column_permissions": fixed_col_perms,
+        "allow_create": current.get("allow_create", False),
+        "allow_delete": current.get("allow_delete", False),
+        "allow_schema_update": current.get("allow_schema_update", False),
+        "allow_schema_delete": current.get("allow_schema_delete", False),
+    }
+    # 应用用户指定字段的覆盖
     if desc is not None:
         body["description"] = desc
     if audience_type is not None:
@@ -705,17 +735,13 @@ def permission_update(ctx: click.Context, role_key: str, table_key: str | None, 
     if allow_schema_delete is not None:
         body["allow_schema_delete"] = allow_schema_delete
 
-    if not body:
-        click.echo("⚠ 未指定任何要更新的字段")
-        return
-
     if dry_run:
         click.echo(f"DRY-RUN PUT /data/table/{tk}/permissions/{role_key}")
         click.echo(f"  Body:\n{_json.dumps(body, indent=2, ensure_ascii=False)}")
         return
 
     resp = client.request("PUT", f"/data/table/{tk}/permissions/{role_key}", body=body)
-    success(resp, as_json=as_json)
+    success(resp, as_json=ctx.obj.get("as_json", False))
 
 
 @permission_group.command("delete")
@@ -723,11 +749,10 @@ def permission_update(ctx: click.Context, role_key: str, table_key: str | None, 
 @click.option("--table-key", default=None, help="表标识 (与 --table-name 二选一)")
 @click.option("--table-name", default=None, help="表名称 (与 --table-key 二选一)")
 @click.option("--force", "-f", is_flag=True, help="跳过确认")
-@click.option("--json", "as_json", is_flag=True)
 @click.option("--dry-run", is_flag=True)
 @click.pass_context
 def permission_delete(ctx: click.Context, role_key: str, table_key: str | None, table_name: str | None,
-                      force: bool, as_json: bool, dry_run: bool) -> None:
+                      force: bool, dry_run: bool) -> None:
     """删除权限策略。"""
     if not force and not dry_run:
         click.confirm(f"确认删除权限策略 '{role_key}'？此操作不可逆", abort=True)
@@ -740,4 +765,4 @@ def permission_delete(ctx: click.Context, role_key: str, table_key: str | None, 
         return
 
     resp = client.request("DELETE", f"/data/table/{tk}/permissions/{role_key}")
-    success(resp, as_json=as_json)
+    success(resp, as_json=ctx.obj.get("as_json", False))
