@@ -451,7 +451,7 @@ emoo --user-id <id> chat create --title "项目讨论"
 
 #### `emoo chat send`
 
-发送对话消息并获取 AI 回复（当前仅支持一次性返回，不支持 SSE 流式）。
+发送对话消息并获取 AI 回复。API 支持 `stream=true` SSE 流式，当前 CLI 仅封装一次性返回。
 
 | 参数 | 必填 | 说明 |
 |------|:----:|------|
@@ -1222,13 +1222,24 @@ emoo data get --stream 2>/dev/null \
 | 错误码 | 说明 | 处理建议 |
 |:------:|------|----------|
 | `200` | 成功 | — |
+| `4006` | workspace 不存在 | 检查 Base URL / 工作区 |
+| `4007` | 用户不存在 | 检查 `open_id` |
+| `4008` | 应用不存在 | 检查 `ws_app_key` |
+| `4012` | 资源不存在 | 检查记录/doc_key/folder 等 |
+| `4015` | 参数校验失败 | 看 `data.reason`，用 `emoo schema` 核对 |
+| `4029` / `4031` | 角色重名 / 角色不存在 | 检查角色名或 id |
+| `4041` | 文件不存在 | 先 confirm 上传 |
+| `4042` | 无权限 | 确认当前用户/角色权限 |
+| `4044` | 对话 query 为空 | 检查 `-q` |
+| `4045` | chat_id 不属于当前用户 | 检查 `--chat-id` |
+| `4081` | Agent 不属于当前 workspace | 检查 `ws_agent_key` |
 | `4083` | API Token 无效 | 重新执行 `emoo auth login` |
-| `4084` | Emoo-User-Id 无效 | 检查 `--user-id` 参数是否正确 |
-| `4008` | 应用不存在 | 检查 `ws_app_key` 是否正确 |
-| `4042` | 无权限访问该应用 | 确认当前用户有权访问此应用 |
+| `4084` | Emoo-User-Id 无效 | 检查 `--user-id` |
 | `4092` | ws_agent_key 不存在 | 检查 Agent Key |
-| `4044` | 对话消息不能为空 | 检查 `-q` 参数 |
-| `4133` | 表不存在 | 检查 `--table-name` 或 `--table-key` 是否正确 |
+| `4113` / `4114` | Tag/快捷方式超限 / Tag 重名 | 删除旧项或改名 |
+| `4133` | 表不存在 | 检查 `--table-name` / `--table-key` |
+| `4154` | 触发限流 | 按 `data.retry_after` 重试 |
+| `4205`-`4210` | folder / 权限策略相关错误 | 检查 folder 层级、role 跨表、open_id |
 
 ### HTTP 状态码
 
@@ -1394,6 +1405,24 @@ emoo agent update <ws_agent_key> --disabled  # 禁用
 emoo agent delete <ws_agent_key> -f          # 强制删除（跳过确认）
 ```
 
+数据源权限（v0.2.0+）：
+
+```bash
+# 仅允许指定数据源（include_specified_data）
+emoo agent create -n "受限助手" -t webhook -c '<config>' \
+  --data-auth include_specified_data \
+  --ws-app-keys <ws_app_key> --doc-group-ids 1,2 --doc-ids 10,11
+
+# 排除指定数据源
+emoo agent update <ws_agent_key> --data-auth exclude_specified_data \
+  --ws-app-keys <ws_app_key>
+
+# 恢复全部数据
+emoo agent update <ws_agent_key> --data-auth all
+```
+
+`data_auth` 非 `all` 时 `data_auth_config` 三个列表至少一个非空；`data_auth=all` 时不能传 config。
+
 Agent 配置按 `agent_type` 有不同结构：
 
 | 类型 | 必填字段 | 可选字段 |
@@ -1417,9 +1446,14 @@ emoo role update 1 --name "技术一部"
 emoo role delete 1 -f
 
 # 成员管理
+emoo role members-list 1 [--page-size 50]   # 成员列表 (分页)
 emoo role members-add 1 open_xxx open_yyy
 emoo role members-add 1 --file members.txt    # 从文件读取 open_id（每行一个）
 emoo role members-remove 1 open_xxx
+
+# 批量按 id 查询角色（≤100，按请求顺序返回）
+emoo role batch-get 1 2 3
+emoo --json role batch-get -f role_ids.json
 ```
 
 ### 表权限管理 (v0.1.7+)
@@ -1522,6 +1556,30 @@ emoo --json file extract <file_key>
 ```
 
 不走 OCR：图片与纯扫描 PDF 返回空内容；>50MB 文件跳过解析。
+
+---
+
+## 文档维护
+
+远端 API 文档源：`https://open.emooai.com/llms.txt`（llms.txt + 每个端点一份 Markdown，内嵌 OpenAPI YAML）。
+
+```bash
+pip install pyyaml                     # 仅文档同步需要
+python scripts/sync_api_docs.py        # 抓取远端 + 生成下列文件
+python scripts/sync_api_docs.py --check   # 只比对 registry，有差异退出码 1
+python scripts/sync_api_docs.py --offline # 复用 .cache/emoo-docs
+python scripts/check_coverage.py        # 校验每个端点都有对应 L2 命令
+```
+
+生成文件（不要手改）：
+
+| 文件 | 用途 |
+|------|------|
+| `docs/openapi.json` | 合并后的完整 OpenAPI 规范（Apifox 可导入） |
+| `src/commands/endpoints.json` | `emoo schema` 的端点注册表（73 个操作） |
+| `EMOO_OpenAPI_Documentation.md` | 本文档库的人类可读 API 参考 |
+
+新增端点时在 `scripts/sync_api_docs.py` 的 `KEY_MAP` 中登记 CLI key，脚本会对未登记操作给出警告。
 
 ---
 

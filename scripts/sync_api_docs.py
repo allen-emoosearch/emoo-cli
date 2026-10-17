@@ -33,6 +33,7 @@ except ImportError:  # pragma: no cover
 ROOT = Path(__file__).resolve().parents[1]
 REGISTRY = ROOT / "src" / "commands" / "endpoints.json"
 SPEC_OUT = ROOT / "docs" / "openapi.json"
+API_DOC_OUT = ROOT / "EMOO_OpenAPI_Documentation.md"
 CACHE_DIR = ROOT / ".cache" / "emoo-docs"
 
 LLMS_URL = "https://open.emooai.com/llms.txt"
@@ -130,6 +131,7 @@ KEY_MAP: dict[tuple[str, str], str] = {
 
 DESCRIPTION_OVERRIDES = {
     ("POST", "/message"): "推送消息并落工作项（normal/agent；thread_key 幂等，due_at 截止时间）",
+    ("POST", "/chat/messages"): "发送对话消息并返回 AI 回答（API 支持 stream=true SSE；CLI 目前一次性返回）",
 }
 
 AUTH_FREE = {("GET", "/auth/token")}
@@ -447,6 +449,217 @@ def build_entry(method: str, path: str, op: dict, spec: dict) -> dict:
     return entry
 
 
+TAG_ORDER = [
+    "鉴权",
+    "应用",
+    "Agent 管理",
+    "搜索能力",
+    "对话能力",
+    "工作项/个人管理",
+    "工作项/标签",
+    "工作项/消息推送与回调",
+    "个人快捷方式",
+    "用户管理",
+    "角色管理",
+    "知识库/上传文件",
+    "知识库/文件管理",
+    "知识库/Folder 管理",
+    "知识库/表管理",
+    "知识库/列管理",
+    "知识库/表记录",
+    "知识库/表权限管理",
+]
+
+ERROR_CODES = [
+    ("4006", "workspace_not_found", "workspace 不存在或被删除"),
+    ("4007", "user_not_found", "open_id 在工作区中无对应用户"),
+    ("4008", "ws_app_not_found", "ws_app_key 不存在"),
+    ("4012", "data_not_found", "记录/doc_key/folder 等资源不存在"),
+    ("4015", "invalid_params", "参数校验失败（具体原因见 data.reason）"),
+    ("4029", "ws_group_name_exists", "角色名重复"),
+    ("4031", "ws_group_not_found", "ws_group_id 不存在"),
+    ("4034", "file_already_exists", "file_key 已 confirm 过"),
+    ("4035", "file_too_large", "单文件超过大小上限"),
+    ("4041", "file_not_found", "file_key 未确认上传或文件不存在"),
+    ("4042", "permission_denied", "权限不足"),
+    ("4044", "chat_message_query_required", "query 缺失或为空"),
+    ("4045", "chat_not_found", "chat_id 不属于当前用户/工作区"),
+    ("4081", "ws_agent_not_found", "agent 不属于当前 workspace"),
+    ("4083", "invalid_api_token", "API Token 无效，重新登录"),
+    ("4084", "invalid_open_api_user_id", "缺少/无效 Emoo-User-Id（HTTP 401）"),
+    ("4092", "invalid_open_api_ws_agent_key", "ws_agent_key 不存在"),
+    ("4113", "limit_exceeded", "Tag/快捷方式等数量超过上限"),
+    ("4114", "duplicate_name", "Tag 名称重复"),
+    ("4133", "base_table_not_found", "数据表不存在"),
+    ("4134", "base_table_name_exists", "同名表已存在"),
+    ("4138", "base_column_name_exists", "同表内列名重复"),
+    ("4139", "base_column_limit_exceeded", "列数超过 300 上限"),
+    ("4140", "base_record_not_found", "记录不存在"),
+    ("4143", "base_record_title_not_unique", "record_title 对应多条记录"),
+    ("4147", "base_record_filter_invalid", "过滤条件 op 对字段类型不开放"),
+    ("4154", "rate_limit_exceeded", "限流超配额（data.retry_after）"),
+    ("4205", "base_folder_not_found", "folder 不存在"),
+    ("4206", "base_folder_name_exists", "同 parent 下 folder 重名"),
+    ("4207", "base_folder_depth_exceeded", "folder 超过 10 层"),
+    ("4208", "base_folder_cycle_detected", "folder 移动成环"),
+    ("4209", "base_role_cross_table_conflict", "权限 role 命中其他表"),
+    ("4210", "base_open_id_invalid", "指定的 open_id 不存在"),
+]
+
+
+def _md_cell(value) -> str:
+    text = "" if value is None else str(value)
+    return text.replace("|", "\\|").replace("\n", " ")
+
+
+def _md_table(headers: list[str], rows: list[list]) -> list[str]:
+    if not rows:
+        return []
+    out = ["| " + " | ".join(headers) + " |",
+           "|" + "|".join(["---"] * len(headers)) + "|"]
+    for row in rows:
+        out.append("| " + " | ".join(_md_cell(c) for c in row) + " |")
+    return out
+
+
+def render_markdown(spec: dict, registry: dict) -> str:
+    """Render a human-readable API reference from the merged spec + registry."""
+    grouped: dict[str, list[tuple[str, str, dict, str]]] = {}
+    for path, item in spec["paths"].items():
+        for method, op in item.items():
+            key = KEY_MAP.get((method.upper(), path))
+            if not key or key not in registry:
+                continue
+            tags = op.get("tags") or ["其他"]
+            tag = tags[0]
+            grouped.setdefault(tag, []).append((method.upper(), path, op, key))
+
+    lines: list[str] = []
+    lines += [
+        "# EMOO 开放平台 API 文档",
+        "",
+        "> **Base URL:** `https://app.emooai.com/open-api/v1`",
+        "> **认证方式:** Bearer Token（API Key `emoo_...` 或 OAuth2 `access_token`）",
+        "> **文档来源:** https://open.emooai.com",
+        "> **机器可读规范:** `docs/openapi.json`",
+        "> **生成日期:** 2026-10-17",
+        f"> **接口总数:** {len(registry)} 个操作",
+        "",
+        "> 本文由 `python scripts/sync_api_docs.py` 从远端 `llms.txt` 自动生成，请勿手工编辑。",
+        "",
+        "## 快速导航",
+        "",
+    ]
+    for tag in TAG_ORDER:
+        if tag in grouped:
+            anchor = tag.replace("/", "").replace(" ", "-")
+            lines.append(f"- [{tag}](#{anchor})（{len(grouped[tag])}）")
+    if "其他" in grouped:
+        lines.append(f"- [其他](#其他)（{len(grouped['其他'])}）")
+    lines += [
+        "",
+        "## 通用约定",
+        "",
+        "### 认证",
+        "",
+        "- **API Key（推荐）**：`Authorization: Bearer emoo_xxx`，自动继承绑定用户，无需 `Emoo-User-Id`。",
+        "- **OAuth2**：`Authorization: Bearer <access_token>` + `Emoo-User-Id: <open_id>`。",
+        "- 例外：`/message`、`/message/batch`、`/message/status`、`/message/status/query`、`/chat/agent-messages` 支持服务间调用，`Emoo-User-Id` 可选。",
+        "- 注意：所有错误除认证外通常返回 HTTP 200，调用方必须检查 `body.code == 200`。",
+        "",
+        "### 业务错误码",
+        "",
+    ]
+    lines += _md_table(
+        ["code", "message", "说明"],
+        [[c, m, d] for c, m, d in ERROR_CODES],
+    )
+    lines += [
+        "",
+        "### 过滤条件",
+        "",
+        "- `/search`、`/data`、`/search/aggregate` 的 `filter_conditions` 是二维数组：外层 OR、内层 AND。",
+        "- 运算符：`eq` / `neq` / `in` / `nin` / `gte` / `lte`。",
+        "- `/data/records/list` 的 `filters` 是字符串数组：`field:op:value`，op 支持 `eq/neq/in/not_in/gte/lte/is_empty/is_not_empty`。",
+        "",
+        "### 字段类型（Base 写入）",
+        "",
+        "| 类型 | 写入 | 示例 |",
+        "|------|------|------|",
+        "| string / number / date / time / datetime | 标量 | `\"hello\"` / `123.45` / `\"2026-06-15\"` |",
+        "| boolean | 布尔 | `true` / `false` |",
+        "| select | 简单值 | `\"a\"`（不能 `[\"a\"]`） |",
+        "| reference | 数组 | `[\"record_key\"]` |",
+        "| user / group | 数字 ID | `123` / `1` |",
+        "| file | URL 字符串 | `\"https://...\"` |",
+        "",
+        "## API 详情",
+        "",
+    ]
+
+    for tag in TAG_ORDER + ["其他"]:
+        if tag not in grouped:
+            continue
+        ops = sorted(grouped[tag], key=lambda x: (x[1], x[0]))
+        lines += [f"### {tag}", "", "| 方法 | 路径 | 说明 |", "|------|------|------|"]
+        for method, path, op, key in ops:
+            summary = op.get("summary") or registry[key].get("description", "")
+            lines.append(f"| `{method}` | `{path}` | {_md_cell(summary)} |")
+        lines.append("")
+
+        for method, path, op, key in ops:
+            entry = registry[key]
+            lines += [f"#### `{method} {path}`", ""]
+            if entry.get("description"):
+                lines += [entry["description"], ""]
+
+            auth = []
+            if entry.get("auth_required"):
+                auth.append("Bearer Token")
+            if entry.get("user_id_required"):
+                auth.append("Emoo-User-Id")
+            lines += [f"**认证:** {' + '.join(auth) if auth else '无需认证'}", ""]
+
+            if entry.get("path_params"):
+                lines += ["**路径参数**", ""]
+                lines += _md_table(
+                    ["参数", "类型", "必填", "说明"],
+                    [[p["name"], p["type"], "是" if p.get("required") else "否", p.get("desc", "")]
+                     for p in entry["path_params"]],
+                )
+                lines.append("")
+            if entry.get("params"):
+                lines += ["**Query 参数**", ""]
+                lines += _md_table(
+                    ["参数", "类型", "必填", "说明"],
+                    [[p["name"], p["type"],
+                      "是" if p.get("required") is True else ("条件" if p.get("required") else "否"),
+                      p.get("desc", "")] for p in entry["params"]],
+                )
+                lines.append("")
+            if entry.get("body"):
+                lines += ["**Body 参数**", ""]
+                lines += _md_table(
+                    ["参数", "类型", "必填", "说明"],
+                    [[p["name"], p["type"],
+                      "是" if p.get("required") is True else ("条件" if p.get("required") else "否"),
+                      p.get("desc", "")] for p in entry["body"]],
+                )
+                lines.append("")
+            if entry.get("response"):
+                lines += ["**响应字段**", ""]
+                for field, desc in entry["response"].items():
+                    lines.append(f"- `{field}`: {desc}")
+                lines.append("")
+            if entry.get("filter_fields"):
+                lines += [f"**可过滤字段:** {', '.join(entry['filter_fields'])}", ""]
+            if entry.get("filter_operators"):
+                lines += [f"**过滤运算符:** {', '.join(entry['filter_operators'])}", ""]
+            lines += [f"```bash", f"emoo api {method} /v1{path}", "```", ""]
+
+    return "\n".join(lines).rstrip() + "\n"
+
+
 def generate_registry(spec: dict, old: dict) -> dict:
     registry: dict[str, dict] = {}
     unmapped: list[str] = []
@@ -484,6 +697,7 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--check", action="store_true", help="只比对，不写文件；有差异时退出码 1")
     parser.add_argument("--offline", action="store_true", help="使用 .cache/emoo-docs 中的缓存")
+    parser.add_argument("--no-api-doc", action="store_true", help="不生成人类可读的 EMOO_OpenAPI_Documentation.md")
     args = parser.parse_args()
 
     docs = fetch_all_markdown(args.offline)
@@ -514,6 +728,9 @@ def main() -> int:
     REGISTRY.write_text(json.dumps(registry, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     print(f"已写入 {SPEC_OUT.relative_to(ROOT)} ({SPEC_OUT.stat().st_size // 1024} KB)")
     print(f"已写入 {REGISTRY.relative_to(ROOT)} ({len(registry)} endpoints)")
+    if not args.no_api_doc:
+        API_DOC_OUT.write_text(render_markdown(spec, registry), encoding="utf-8")
+        print(f"已写入 {API_DOC_OUT.relative_to(ROOT)} ({API_DOC_OUT.stat().st_size // 1024} KB)")
     return 0
 
 

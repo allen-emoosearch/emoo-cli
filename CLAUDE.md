@@ -10,7 +10,7 @@ installed `emoo` command will still run the stale code.
 
 - Config stored at `~/.emoo/config.json`
 - Two auth modes: API Key (recommended, no `--user-id` needed for most commands) or OAuth2 (needs `--user-id`)
-- Agent/Role/Permission commands ALWAYS need `--user-id` regardless of auth mode
+- OAuth2 模式下 Agent/Role/Permission 等命令需要 `--user-id`；API Key 模式自动继承绑定用户，无需传
 - All commands auto-refresh OAuth2 tokens 60s before expiry
 
 ## Search Strategy (ALWAYS follow this order)
@@ -21,6 +21,7 @@ When a user asks a question, start from the knowledge map — never default to `
 2. **For chat/group conversations**: `emoo skill pipeline analyze "<query>"` — KM matches rooms → searches with time+keyword → aggregates
 3. **For structured documents**: `emoo data search -k "<keyword>" -f '<filter>'` — use app filter from KM
 4. **For Base table data**: `emoo base record-list --table-name "<name>" -f "..."` — use table names from KM
+5. **For counts / sums / group-by / trends**: `emoo data aggregate -m count|sum|avg|min|max|values --group-by ...` — 服务端聚合，不要拉全量到本地算
 
 The KM tells you:
 - What apps/documents exist (for data search)
@@ -294,10 +295,12 @@ pip install pyyaml                  # dev-only dependency
 python scripts/sync_api_docs.py     # fetch + regenerate docs/openapi.json + src/commands/endpoints.json
 python scripts/sync_api_docs.py --offline   # reuse .cache/emoo-docs
 python scripts/sync_api_docs.py --check     # exit 1 when the registry is stale
+python scripts/check_coverage.py            # verify every registry key has an L2 command
 ```
 
-`src/commands/endpoints.json` is generated — do not hand-edit it. Add new
-operations to `KEY_MAP` in the sync script instead.
+`src/commands/endpoints.json` and `EMOO_OpenAPI_Documentation.md` are generated —
+do not hand-edit them. Add new operations to `KEY_MAP` in the sync script instead.
+Use `--no-api-doc` to skip the Markdown reference.
 
 ## File structure
 
@@ -346,8 +349,20 @@ src/
 | 4008 | NotFoundError | App does not exist |
 | 4042 | PermissionError | No permission to access this app |
 | 4092 | NotFoundError | ws_agent_key does not exist |
+| 4006 | NotFoundError | Workspace does not exist |
+| 4007 | NotFoundError | User (open_id) does not exist |
+| 4012 | NotFoundError | Record/doc_key/folder does not exist |
+| 4015 | ValidationError | Invalid params (see data.reason) |
+| 4029 | ValidationError | Role name already exists |
+| 4031 | NotFoundError | ws_group_id does not exist |
+| 4041 | NotFoundError | File not found / not confirmed |
 | 4044 | ValidationError | Message/chat content is empty |
+| 4045 | NotFoundError | chat_id not owned by current user |
+| 4081 | NotFoundError | Agent not in current workspace |
+| 4113 / 4114 | ValidationError | Tag/shortcut limit / duplicate Tag name |
 | 4133 | NotFoundError | Table does not exist |
+| 4154 | ServerError | Rate limit exceeded (retry_after) |
+| 4205-4210 | ValidationError | Folder tree / permission strategy errors |
 
 ### HTTP status codes
 

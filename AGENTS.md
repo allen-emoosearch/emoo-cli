@@ -47,7 +47,7 @@ src/
 
 - **安装模式**: 非 editable 安装，改源码后必须 `pip install --force-reinstall .`
 - **错误处理**: 使用 `from_api_response()` 构建错误，AI Agent 依赖 `hint` 字段自愈
-- **API 端点**: 远端文档源为 `https://open.emooai.com/llms.txt`；运行 `python scripts/sync_api_docs.py` 重新生成 `docs/openapi.json` + `src/commands/endpoints.json`。不要手改 endpoints.json
+- **API 端点**: 远端文档源为 `https://open.emooai.com/llms.txt`；运行 `python scripts/sync_api_docs.py` 重新生成 `docs/openapi.json` + `src/commands/endpoints.json` + `EMOO_OpenAPI_Documentation.md`。不要手改生成文件
 - **进度消息**: 所有进度/信息类消息必须通过 `_progress()` 写 stderr，不能直接 `click.echo()`
 - **JSON 模式**: 每个命令必须检查 `ctx.obj.get("as_json")`，输出结构化 JSON 到 stdout
 

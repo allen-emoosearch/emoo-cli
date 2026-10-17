@@ -60,6 +60,13 @@ emoo data search -k "关键词" -f '{"field":"ws_app.ws_app_key","operator":"eq"
 emoo base record-list --table-name "表名" -f "content:contains:关键词"
 ```
 
+### 数量/金额/趋势 → data aggregate
+```bash
+emoo data aggregate -m count --group-by 部门
+emoo data aggregate -m sum --field 合同金额
+emoo data aggregate -m count --group-by 签约日 --interval month
+```
+
 ## 时间表达支持
 
 近一周 / 近一个月 / 近N天 / 今天 / 昨天 / 本周 / 本月 / 上个季度

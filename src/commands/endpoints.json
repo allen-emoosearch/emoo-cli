@@ -1307,7 +1307,7 @@
     "path": "/chat/messages",
     "auth_required": true,
     "user_id_required": true,
-    "description": "发送对话消息并获取 AI 回复（不支持 SSE 流式）",
+    "description": "发送对话消息并返回 AI 回答（API 支持 stream=true SSE；CLI 目前一次性返回）",
     "body": [
       {
         "name": "chat_id",
