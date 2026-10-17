@@ -97,6 +97,12 @@ emoo data aggregate -m sum --field 合同金额           # 金额合计
 emoo data aggregate -m count --group-by 部门          # 按部门分组
 emoo data aggregate -m count --group-by 签约日 --interval month   # 按月趋势
 emoo data aggregate -m values --field 工号            # 字段枚举
+
+# 让管线自动识别统计意图并生成聚合方案 (KM v2)
+emoo skill pipeline knowledge-map --auto --ttl 24h
+emoo skill pipeline intent "各门店采购金额合计" -o plan.json
+emoo skill pipeline search -p plan.json
+emoo skill pipeline search -p plan.json --fallback   # 聚合无结果时回退搜索
 ```
 
 ### Base 表操作
@@ -240,7 +246,7 @@ emoo shortcut list / create / update / delete / reorder
 
 ## 注意事项
 
-1. **KM 优先**: 任何搜索前确保知识图谱缓存有效
+1. **KM 优先**: 任何搜索前确保知识图谱缓存有效；KM 为 schema v2，含字段目录（`fields`），旧缓存会自动重建
 2. **Chat → analyze**: 群聊查询必须用 analyze 管道，不用 data search
 3. **Doc → data search**: 文档搜索必须带 filter，从 KM 获取 ws_app_key
 4. **select ≠ reference**: select 用裸值，reference 用数组，不可互换

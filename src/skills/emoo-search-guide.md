@@ -113,6 +113,18 @@ emoo data aggregate -m values --field 工号                 # 枚举值
 # 服务端聚合，避免拉全量文档；hard cap: 50 组 / 200 值
 ```
 
+### 让管线自动选字段 (KM v2)
+
+```bash
+emoo skill pipeline knowledge-map --auto --ttl 24h   # KM v2 会扫描文档字段
+emoo skill pipeline intent "各门店采购金额合计" -o plan.json
+emoo skill pipeline search -p plan.json
+emoo skill pipeline search -p plan.json --fallback   # 聚合无结果时回退搜索
+```
+
+KM v2 的每个文档组记录 `fields`（字段路径/类型/枚举值），`intent` 会自动匹配
+`metric_field` 与 `group_by_field`，无需手工猜字段名。
+
 ---
 
 ## 五、Base 表操作 `base`

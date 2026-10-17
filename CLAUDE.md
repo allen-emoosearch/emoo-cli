@@ -21,7 +21,10 @@ When a user asks a question, start from the knowledge map — never default to `
 2. **For chat/group conversations**: `emoo skill pipeline analyze "<query>"` — KM matches rooms → searches with time+keyword → aggregates
 3. **For structured documents**: `emoo data search -k "<keyword>" -f '<filter>'` — use app filter from KM
 4. **For Base table data**: `emoo base record-list --table-name "<name>" -f "..."` — use table names from KM
-5. **For counts / sums / group-by / trends**: `emoo data aggregate -m count|sum|avg|min|max|values --group-by ...` — 服务端聚合，不要拉全量到本地算
+5. **For counts / sums / group-by / trends**:
+   - 先用 `emoo skill pipeline intent "<查询>"` — KM v2 会自动匹配 `metric_field` / `group_by_field` 并生成 aggregate 步骤
+   - 或直接 `emoo data aggregate -m count|sum|avg|min|max|values --group-by ...`
+   - 服务端聚合，不要拉全量到本地算
 
 The KM tells you:
 - What apps/documents exist (for data search)
@@ -281,9 +284,25 @@ emoo api POST /v1/chat/messages -d '{"query":"hi"}' --dry-run
 
 ```bash
 emoo skill pipeline knowledge-map --max-doc-groups 200 -o /tmp/km
+emoo skill pipeline knowledge-map --skip-base      # 只建文档 KM（更快，跳过 Base 表嗅探）
 emoo skill pipeline intent "示例门店店3月营收"
 emoo skill pipeline search -p plan.json --csv output.csv
 ```
+
+KM v2 (schema_version=2) 额外记录每个文档组从 `content` 采样到的字段目录
+（`fields[].path/type/values`，含 `明细.*.金额` 嵌套列）。旧版 KM 缓存会被
+`knowledge_map` 自动检测并重建。
+
+统计类查询优先走聚合：
+
+```bash
+emoo skill pipeline intent "各门店采购金额合计" -o plan.json
+emoo skill pipeline search -p plan.json            # type=aggregate 步骤
+emoo skill pipeline search -p plan.json --fallback # 聚合无结果时回退文档搜索
+```
+
+支持 `sum/avg/max/min/count/values/trend/ranking`，时间表达包括
+`近一周/近一个月/近半年/本季度/上个季度`。
 
 ## API docs sync (v0.2.0)
 
@@ -332,9 +351,9 @@ src/
     loader.py               # MD skill parser (YAML frontmatter)
     runner.py               # Skill executor (template → app resolve → search → CSV)
     registry.py             # Claude Code symlink registration
-    knowledge_map.py         # Pipeline: generate knowledge map
-    intent.py               # Pipeline: intent analysis
-    search.py               # Pipeline: execute search plan
+    knowledge_map.py         # Pipeline: KM v2 — /data sampling + field catalogue
+    intent.py               # Pipeline: search + aggregate intent (metric/group/trend)
+    search.py               # Pipeline: execute search / aggregate plan + fallback
 ```
 
 ## Error codes

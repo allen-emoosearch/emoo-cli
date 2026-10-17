@@ -27,7 +27,10 @@ def app(ctx):
 @click.option("--output-file", "-o", default="emoo_knowledge_map.md", help="输出 Markdown 文件")
 @click.pass_context
 def overview(ctx, max_docs, output_file):
-    """遍历文档，按 ws_app_key 分组生成知识地图，方便搜索前定位数据源。"""
+    """[legacy] 遍历文档生成知识地图；推荐改用 emoo skill pipeline knowledge-map。
+
+    保留此命令用于只关心 ws_app_key → 文档标题的轻量场景。
+    """
     client = EmooClient(base_url=ctx.obj.get("base_url"), user_id=ctx.obj.get("user_id"))
 
     app_docs: dict[str, list[dict]] = {}

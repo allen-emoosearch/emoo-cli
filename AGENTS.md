@@ -38,15 +38,17 @@ src/
     loader.py               # MD skill 解析 (YAML frontmatter)
     runner.py               # Skill 执行 (模板→app 匹配→搜索→CSV)
     registry.py             # Claude Code symlink 注册
-    knowledge_map.py         # Pipeline: 扫描工作区生成知识图谱
-    intent.py               # Pipeline: 自然语言意图分析
-    search.py               # Pipeline: 执行搜索方案聚合多 app 结果
+    knowledge_map.py         # Pipeline: KM v2 — /data 精确采样 + 字段目录 + schema_version
+    intent.py               # Pipeline: 搜索/聚合意图（metric/group/trend/ranking）
+    search.py               # Pipeline: 执行搜索/聚合方案 + fallback
 ```
 
 ## 关键约束
 
 - **安装模式**: 非 editable 安装，改源码后必须 `pip install --force-reinstall .`
 - **错误处理**: 使用 `from_api_response()` 构建错误，AI Agent 依赖 `hint` 字段自愈
+- **KM v2**: 知识图谱必须带 `schema_version`；新增字段采集逻辑时提升版本号，`knowledge_map` 命令会自动让旧缓存失效
+- **聚合意图**: `intent` 输出 `type=aggregate` 步骤，`search` 负责执行；聚合无结果时用 `--fallback` 回退文档搜索
 - **API 端点**: 远端文档源为 `https://open.emooai.com/llms.txt`；运行 `python scripts/sync_api_docs.py` 重新生成 `docs/openapi.json` + `src/commands/endpoints.json` + `EMOO_OpenAPI_Documentation.md`。不要手改生成文件
 - **进度消息**: 所有进度/信息类消息必须通过 `_progress()` 写 stderr，不能直接 `click.echo()`
 - **JSON 模式**: 每个命令必须检查 `ctx.obj.get("as_json")`，输出结构化 JSON 到 stdout
@@ -56,6 +58,9 @@ src/
 - 多租户测试: API Key 模式 + OAuth2 模式，覆盖不同自定义域名
 - 配置切换: 通过 `~/.emoo/config.json` 切换不同工作区进行回归测试
 - 每个命令验证: 正常调用、`--json` 输出、`--dry-run` 预览、错误场景
+- 管线单测: `python scripts/test_pipeline.py`（无网络）
+- 只读冒烟: `python scripts/smoke_test.py`
+- 覆盖校验: `python scripts/check_coverage.py`
 
 ## 提交规范
 

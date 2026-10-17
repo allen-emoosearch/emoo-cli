@@ -7,9 +7,166 @@ Produces two output files in the output directory:
 
 import json
 import os
+import re
 import time
 from collections import Counter
 from typing import Optional
+
+
+KM_SCHEMA_VERSION = 2
+KM_API_VERSION = "2026-10-17"
+try:
+    from importlib.metadata import version as _pkg_version
+    _CLI_VERSION = _pkg_version("emoo-cli")
+except Exception:  # pragma: no cover - source checkout without install
+    _CLI_VERSION = "dev"
+KM_CAPABILITIES = [
+    "search",
+    "aggregate",
+    "work_item",
+    "shortcut",
+    "kb_file",
+    "message_callback",
+    "agent_data_auth",
+]
+
+
+def _sample_docs(client, ws_app_key: str, doc_group_id: str,
+                 limit: int = 5) -> list[dict]:
+    """Sample real documents from one doc group via /data + filter_conditions.
+
+    Unlike a keyword search, this returns the newest documents in the group
+    regardless of whether their titles contain the group name.
+    """
+    filters = [[
+        {"field": "ws_app.ws_app_key", "operator": "eq", "value": ws_app_key},
+    ]]
+    if doc_group_id:
+        filters[0].append(
+            {"field": "doc_group.app_group_id", "operator": "eq", "value": doc_group_id}
+        )
+    resp = client.post("/data", body={
+        "page_size": max(1, min(limit, 50)),
+        "cursor": "",
+        "text_format": "plain",
+        "filter_conditions": filters,
+    })
+    results = resp.get("data", {}).get("results", [])
+    return results if isinstance(results, list) else []
+
+
+def _value_type(value) -> str:
+    if value is None:
+        return "unknown"
+    if isinstance(value, bool):
+        return "boolean"
+    if isinstance(value, (int, float)):
+        return "number"
+    if isinstance(value, list):
+        if not value:
+            return "array"
+        inner = {_value_type(v) for v in value if v is not None}
+        inner.discard("unknown")
+        return f"array[{','.join(sorted(inner))}]" if inner else "array"
+    if isinstance(value, dict):
+        return "object"
+    if isinstance(value, str):
+        text = value.strip()
+        if re.match(r"^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}", text):
+            return "datetime"
+        if re.match(r"^\d{4}-\d{2}-\d{2}$", text):
+            return "date"
+        return "string"
+    return "unknown"
+
+
+def _record_field(fields: dict, path: str, value) -> None:
+    """Accumulate one field profile, merging samples/types across documents."""
+    entry = fields.setdefault(path, {
+        "name": path.split(".")[-1],
+        "path": path,
+        "type": None,
+        "samples": [],
+        "distinct": set(),
+    })
+    value_type = _value_type(value)
+    if entry["type"] is None:
+        entry["type"] = value_type
+    elif entry["type"] != value_type and value_type != "unknown":
+        # date/datetime and array[x]/array[y] are compatible enough; mark mixed.
+        entry["type"] = "mixed"
+
+    if value is not None and len(entry["samples"]) < 3:
+        sample = value if isinstance(value, (int, float, bool)) else str(value)[:80]
+        entry["samples"].append(sample)
+
+    if isinstance(value, (str, int, float, bool)) and not isinstance(value, bool):
+        if len(entry["distinct"]) < 30:
+            entry["distinct"].add(str(value)[:60])
+
+
+def _walk_content(value, prefix: str, fields: dict, depth: int = 0) -> None:
+    """Walk document content and record flat + nested list paths.
+
+    Example: {"明细": [{"金额": 7.8}]} -> 明细.*.金额
+    """
+    if depth > 3:
+        return
+    if isinstance(value, dict):
+        for key, sub in value.items():
+            path = f"{prefix}.{key}" if prefix else key
+            _record_field(fields, path, sub)
+            if isinstance(sub, (dict, list)):
+                _walk_content(sub, path, fields, depth + 1)
+    elif isinstance(value, list):
+        for item in value[:3]:
+            if isinstance(item, dict):
+                for key, sub in item.items():
+                    path = f"{prefix}.*.{key}" if prefix else f"*.{key}"
+                    _record_field(fields, path, sub)
+                    if isinstance(sub, (dict, list)):
+                        _walk_content(sub, path, fields, depth + 1)
+
+
+def _extract_fields(docs: list[dict]) -> list[dict]:
+    """Build a merged field catalogue from sampled documents."""
+    fields: dict[str, dict] = {}
+    for doc in docs:
+        content = doc.get("content")
+        if isinstance(content, dict):
+            _walk_content(content, "", fields)
+
+    result = []
+    for path, entry in sorted(fields.items()):
+        distinct = entry.pop("distinct", set())
+        entry["distinct_count"] = len(distinct)
+        if 0 < len(distinct) <= 20:
+            entry["values"] = sorted(distinct)
+        result.append(entry)
+    return result[:150]
+
+
+def _merge_field_lists(groups: list[list[dict]]) -> list[dict]:
+    """Merge per-doc-group field catalogues into an app-level catalogue."""
+    merged: dict[str, dict] = {}
+    for fields in groups:
+        for field in fields:
+            path = field["path"]
+            if path not in merged:
+                merged[path] = dict(field)
+                continue
+            current = merged[path]
+            if current.get("type") != field.get("type"):
+                current["type"] = "mixed"
+            values = set(current.get("values") or []) | set(field.get("values") or [])
+            if 0 < len(values) <= 20:
+                current["values"] = sorted(values)
+            current["distinct_count"] = max(current.get("distinct_count", 0),
+                                             field.get("distinct_count", 0))
+            for sample in field.get("samples", []):
+                if sample not in current.setdefault("samples", []) and len(current["samples"]) < 3:
+                    current["samples"].append(sample)
+    return sorted(merged.values(), key=lambda x: x["path"])
 
 
 def _sample_titles(client, ws_app_key: str, doc_group_id: str,
@@ -52,9 +209,18 @@ def _scan_base_tables(client) -> list[dict]:
     - Structured tables: field profiles + sample row analysis
     """
     tables = []
+    base_tables: list[dict] = []
     try:
-        tbl_resp = client.get("/data/table", params={"page_size": 100})
-        base_tables = tbl_resp.get("data", {}).get("results", [])
+        page = 1
+        while True:
+            tbl_resp = client.get("/data/table", params={"page_size": 100, "current_page": page})
+            data = tbl_resp.get("data", {})
+            results = data.get("results", []) or []
+            base_tables.extend(results)
+            total_pages = data.get("total_pages", page)
+            if page >= total_pages or not results:
+                break
+            page += 1
     except Exception:
         return tables
 
@@ -71,7 +237,7 @@ def _scan_base_tables(client) -> list[dict]:
         }
 
         if tbl_name and tbl_key and t.get("record_count", 0) > 0:
-            _sniff_table(client, tbl_name, t_entry, sample_size=20)
+            _sniff_table(client, tbl_name, t_entry, sample_size=50)
             field_names = {f["name"] for f in t_entry["fields"]}
             tbl_type = _classify_table(field_names)
             t_entry["type"] = tbl_type
@@ -81,9 +247,6 @@ def _scan_base_tables(client) -> list[dict]:
                 _sniff_chat(client, tbl_name, t_entry)
             else:
                 print(f"    📊 检测到结构化表: {tbl_name}, 进行字段+样本分析...")
-                # Re-sniff with more samples for deeper analysis
-                t_entry["fields"] = []
-                _sniff_table(client, tbl_name, t_entry, sample_size=50)
                 _sniff_sample_rows(client, tbl_name, t_entry)
 
         tables.append(t_entry)
@@ -303,7 +466,8 @@ def _extract_keywords(text: str, min_len: int = 2) -> list[str]:
     """Extract meaningful Chinese keywords from text using punctuation-based segmentation."""
     import re
     # Split by Chinese/English punctuation, whitespace, and digits
-    segments = re.split(r'[，。！？、；：""''「」『』【】（）《》\s\d，\.\!\?\;\:\"\'\(\)\[\]\{\}]+', text)
+    pattern = r"[\s\d，。！？、；：\"'「」『』【】（）《》\.\!\?\;\:\(\)\[\]\{\}]+"
+    segments = re.split(pattern, text)
     words = [s.strip() for s in segments if s.strip()]
     # Keep only segments with Chinese chars and >= min_len
     result = [w for w in words if len(w) >= min_len and re.search(r'[一-鿿]', w)]
@@ -417,7 +581,9 @@ def _build_markdown(km: dict) -> str:
     lines = [
         "# EMOO 增强知识图谱",
         "",
-        f"> 生成时间: {gen_time}  |  应用数: {len(apps)}  |  文档总数: {total_docs}",
+        f"> Schema: v{km.get('schema_version', '?')}  |  API: {km.get('api_version', '?')}  |  "
+        f"生成时间: {gen_time}",
+        f"> 应用数: {len(apps)}  |  文档总数: {total_docs}",
         "",
         "---",
         "",
@@ -449,15 +615,43 @@ def _build_markdown(km: dict) -> str:
         lines.append("")
         groups = a.get("doc_groups", [])
         if groups:
-            lines.append("| 文档组 | 描述 | 文档数 | 示例内容 |")
-            lines.append("|--------|------|--------|---------|")
+            lines.append("| 文档组 | 描述 | 文档数 | 示例内容 | 可聚合字段 |")
+            lines.append("|--------|------|--------|---------|-----------|")
             for g in groups:
                 desc = (g.get("desc") or "")[:40]
                 samples = "、".join(g.get("sample_titles", [])[:2]) or "—"
+                fields = g.get("fields", [])
+                field_str = ", ".join(f"{f['path']}({f['type']})" for f in fields[:6]) or "—"
                 lines.append(
                     f"| {g.get('app_group_name', '')} | {desc} | "
-                    f"{g.get('doc_count', 0)} | {samples} |"
+                    f"{g.get('doc_count', 0)} | {samples} | {field_str[:100]} |"
                 )
+
+            # Aggregate suggestions from discovered fields.
+            number_fields = [f for f in a.get("fields", []) if f.get("type") == "number"]
+            group_fields = [
+                f for f in a.get("fields", [])
+                if f.get("type") in ("string", "mixed") and f.get("values")
+            ]
+            lines.append("")
+            lines.append("**聚合示例**（基于采样字段）：")
+            lines.append("")
+            base_filter = json.dumps([[
+                {"field": "ws_app.ws_app_key", "operator": "eq", "value": a["ws_app_key"]},
+            ]], ensure_ascii=False)
+            if group_fields:
+                gf = group_fields[0]["path"]
+                lines.append(
+                    f"```bash\n# 按 {gf} 分组统计\n"
+                    f"emoo data aggregate -m count --group-by \"{gf}\" -f '{base_filter}'\n```"
+                )
+            if number_fields:
+                nf = number_fields[0]["path"]
+                lines.append(
+                    f"```bash\n# 汇总 {nf}\n"
+                    f"emoo data aggregate -m sum --field \"{nf}\" -f '{base_filter}'\n```"
+                )
+            lines.append("")
         else:
             lines.append("_无文档组数据_")
         lines.append("")
@@ -516,6 +710,7 @@ def generate_knowledge_map(
     max_sample_per_group: int = 5,
     output_dir: str = ".",
     max_doc_groups: int = 200,
+    skip_base: bool = False,
 ) -> str:
     """Generate enhanced knowledge map for the workspace.
 
@@ -524,26 +719,35 @@ def generate_knowledge_map(
         max_sample_per_group: max titles to sample from each doc group
         output_dir: directory for output files
         max_doc_groups: max total doc groups to sample (safety limit)
+        skip_base: skip Base table sniffing (much faster; use when only
+            document search / aggregate intent is needed)
 
     Returns:
         Path to the generated JSON file
     """
     km = {
+        "schema_version": KM_SCHEMA_VERSION,
+        "api_version": KM_API_VERSION,
+        "generated_by": f"emoo-cli {_CLI_VERSION}",
+        "capabilities": KM_CAPABILITIES,
         "generated_at": time.strftime("%Y-%m-%d %H:%M:%S"),
         "apps": [],
         "base_tables": [],
     }
 
-    # Step 0: scan Base tables
-    try:
-        print("正在扫描 Base 数据表...")
-        base_tables = _scan_base_tables(client)
-        km["base_tables"] = base_tables
-        if base_tables:
-            total_recs = sum(t.get("record_count", 0) for t in base_tables)
-            print(f"  Base 表: {len(base_tables)} 个, 共 {total_recs} 条记录")
-    except Exception:
-        pass
+    km["options"] = {"skip_base": skip_base}
+
+    # Step 0: scan Base tables (optional; document-only KM can skip this)
+    if not skip_base:
+        try:
+            print("正在扫描 Base 数据表...")
+            base_tables = _scan_base_tables(client)
+            km["base_tables"] = base_tables
+            if base_tables:
+                total_recs = sum(t.get("record_count", 0) for t in base_tables)
+                print(f"  Base 表: {len(base_tables)} 个, 共 {total_recs} 条记录")
+        except Exception:
+            pass
 
     # Step 1: list all apps
     resp = client.get("/apps")
@@ -576,15 +780,25 @@ def generate_knowledge_map(
         except Exception:
             doc_groups = []
 
-        # Step 3: sample titles from each doc group (respecting limits)
+        # Step 3: sample real docs + fields from each doc group (respecting limits)
         for dg in doc_groups:
             gid = dg.get("app_group_id", "")
             gname = dg.get("app_group_name", "")
+            samples: list[str] = []
+            fields: list[dict] = []
             if total_groups_sampled < max_doc_groups and gid:
-                samples = _sample_titles(client, ws_app_key, gid, gname, max_sample_per_group)
+                docs: list[dict] = []
+                try:
+                    docs = _sample_docs(client, ws_app_key, gid, max_sample_per_group)
+                except Exception:
+                    docs = []
+                if not docs:
+                    # Fallback for deployments where /data filters are limited.
+                    titles = _sample_titles(client, ws_app_key, gid, gname, max_sample_per_group)
+                    docs = [{"title": t, "content": {}} for t in titles]
+                samples = [d.get("title", "") for d in docs if d.get("title")][:max_sample_per_group]
+                fields = _extract_fields(docs)
                 total_groups_sampled += 1
-            else:
-                samples = []
 
             app_entry["doc_groups"].append({
                 "app_group_id": gid,
@@ -593,6 +807,7 @@ def generate_knowledge_map(
                 "url": dg.get("url", ""),
                 "doc_count": dg.get("doc_count", 0),
                 "sample_titles": samples,
+                "fields": fields,
             })
 
             # Also accumulate app-level sample titles
@@ -601,6 +816,10 @@ def generate_knowledge_map(
                     app_entry["sample_titles"].append(s)
                     if len(app_entry["sample_titles"]) >= 10:
                         break
+
+        app_entry["fields"] = _merge_field_lists(
+            [g.get("fields", []) for g in app_entry["doc_groups"]]
+        )
 
         # If no doc groups sampled yet, do a blanket app-level search for titles
         if not app_entry["sample_titles"] and app_entry["doc_count"] > 0:

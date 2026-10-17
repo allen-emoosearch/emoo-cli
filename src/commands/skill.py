@@ -71,8 +71,9 @@ def _default_km_path() -> str:
 
 
 from ..skills import generate_knowledge_map, analyze_intent, execute_search_plan
+from ..skills.knowledge_map import KM_SCHEMA_VERSION
 from ..skills.analyze import run_analyze
-from ..skills.search import export_results_csv
+from ..skills.search import export_results_csv, export_aggregates_csv
 from ..skills.loader import (
     load_all_skills, find_skill, validate_params,
 )
@@ -462,9 +463,12 @@ def pipeline():
 @click.option("--auto/--no-auto", "auto_mode", default=True, help="自动缓存模式: 24h内未过期则跳过生成 (默认开启)")
 @click.option("--ttl", default="24h", help="缓存有效期 (格式: 24h/24h/30m, 默认 24h)")
 @click.option("--refresh", "force_refresh", is_flag=True, default=False, help="强制重新生成，忽略缓存")
+@click.option("--skip-base", is_flag=True, default=False,
+              help="跳过 Base 表嗅探（更快；只做文档搜索/聚合时使用）")
 @click.pass_context
-def knowledge_map(ctx, max_sample_per_group, max_doc_groups, output_dir, auto_mode, ttl, force_refresh):
-    """生成增强知识图谱，包含 app 文档组详情、标题采样、Base 表嗅探.
+def knowledge_map(ctx, max_sample_per_group, max_doc_groups, output_dir, auto_mode,
+                  ttl, force_refresh, skip_base):
+    """生成增强知识图谱 (schema v2)，包含文档采样、字段发现、Base 表嗅探.
 
     \b
     缓存策略:
@@ -503,11 +507,24 @@ def knowledge_map(ctx, max_sample_per_group, max_doc_groups, output_dir, auto_mo
     if os.path.exists(cached_json):
         cache_age = time.time() - os.path.getmtime(cached_json)
 
-    # Auto mode: skip if cache is fresh
-    if auto_mode and not force_refresh and cache_age > 0 and cache_age < ttl_seconds:
-        _progress(f"📦 使用缓存知识图谱 (生成于 {cache_age/3600:.1f} 小时前, TTL={ttl})")
+    use_cache = (
+        auto_mode and not force_refresh and cache_age > 0 and cache_age < ttl_seconds
+    )
+    km = None
+    if use_cache:
         with open(cached_json, encoding="utf-8") as f:
             km = json.load(f)
+        cached_version = km.get("schema_version")
+        if cached_version != KM_SCHEMA_VERSION:
+            _progress(
+                f"⚠ 知识图谱 schema 版本过旧 (v{cached_version} → v{KM_SCHEMA_VERSION})，"
+                f"重新生成..."
+            )
+            use_cache = False
+            km = None
+
+    if use_cache and km is not None:
+        _progress(f"📦 使用缓存知识图谱 (生成于 {cache_age/3600:.1f} 小时前, TTL={ttl})")
     else:
         if force_refresh and cache_age > 0:
             _progress(f"🔄 强制刷新 (缓存已存在 {cache_age/3600:.1f} 小时)")
@@ -522,6 +539,7 @@ def knowledge_map(ctx, max_sample_per_group, max_doc_groups, output_dir, auto_mo
             max_sample_per_group=max_sample_per_group,
             max_doc_groups=max_doc_groups,
             output_dir=output_dir,
+            skip_base=skip_base,
         )
         with open(cached_json, encoding="utf-8") as f:
             km = json.load(f)
@@ -532,7 +550,7 @@ def knowledge_map(ctx, max_sample_per_group, max_doc_groups, output_dir, auto_mo
     base_tables = km.get("base_tables", [])
     base_records = sum(t.get("record_count", 0) for t in base_tables)
 
-    _progress(f"\n知识图谱{' (缓存)' if auto_mode and not force_refresh and cache_age > 0 and cache_age < ttl_seconds else ''}:")
+    _progress(f"\n知识图谱{' (缓存)' if use_cache else ''} (schema v{km.get('schema_version', '?')}):")
     _progress(f"  路径: {os.path.abspath(output_dir)}")
     _progress(f"  应用: {len(apps)} 个, 文档组: {total_groups} 个, 文档: {total_docs} 篇")
     if base_tables:
@@ -611,6 +629,18 @@ def intent(ctx, query, km_path, top, output_file):
         if entities.get("time_range"):
             tr = entities["time_range"]
             ent_lines.append(f"  时间: {tr.get('from', '')} ~ {tr.get('to', '')}")
+        metric = entities.get("metric_intent")
+        if metric:
+            bits = [f"指标={metric.get('metric_type')}"]
+            if metric.get("field_hints"):
+                bits.append(f"字段线索={','.join(metric['field_hints'][:4])}")
+            if metric.get("group_hint"):
+                bits.append(f"分组线索={metric['group_hint']}")
+            if metric.get("interval"):
+                bits.append(f"时间粒度={metric['interval']}")
+            if metric.get("note"):
+                bits.append(metric["note"])
+            ent_lines.append("  " + " | ".join(bits))
         if ent_lines:
             console.print(Panel("\n".join(ent_lines), title="提取的实体"))
 
@@ -618,32 +648,73 @@ def intent(ctx, query, km_path, top, output_file):
             console.print("[dim]未找到匹配的搜索方案，请检查知识图谱是否覆盖了查询内容[/dim]")
             return
 
-        table = Table(title=f"搜索方案 ({len(plan)} 步)")
-        table.add_column("步骤", justify="right")
-        table.add_column("应用", style="cyan")
-        table.add_column("文档组")
-        table.add_column("关键词")
-        table.add_column("置信度", justify="right")
-        table.add_column("匹配理由")
+        agg_steps = [p for p in plan if p.get("type") == "aggregate"]
+        search_steps = [p for p in plan if p.get("type") != "aggregate"]
 
-        for p in plan:
-            table.add_row(
-                str(p["step"]),
-                p["ws_app_title"],
-                p.get("doc_group_name", "—") or "—",
-                p["keyword"],
-                f"{p['confidence']:.0%}",
-                p.get("match_reason", ""),
-            )
-        console.print(table)
+        if agg_steps:
+            table = Table(title=f"聚合方案 ({len(agg_steps)} 步)")
+            table.add_column("步骤", justify="right")
+            table.add_column("应用", style="cyan")
+            table.add_column("文档组")
+            table.add_column("指标")
+            table.add_column("字段")
+            table.add_column("分组")
+            table.add_column("置信度", justify="right")
+            table.add_column("匹配理由")
+            for p in agg_steps:
+                table.add_row(
+                    str(p["step"]),
+                    p.get("ws_app_title", ""),
+                    p.get("doc_group_name", "—") or "—",
+                    p.get("metric_type", ""),
+                    p.get("metric_field") or "—",
+                    (p.get("group_by_field") or "—")
+                    + (f"/{p['group_by_interval']}" if p.get("group_by_interval") else ""),
+                    f"{p.get('confidence', 0):.0%}",
+                    p.get("match_reason", ""),
+                )
+            console.print(table)
+
+        if search_steps:
+            table = Table(title=f"文档搜索方案 ({len(search_steps)} 步)")
+            table.add_column("步骤", justify="right")
+            table.add_column("应用", style="cyan")
+            table.add_column("文档组")
+            table.add_column("关键词")
+            table.add_column("置信度", justify="right")
+            table.add_column("匹配理由")
+            for p in search_steps:
+                table.add_row(
+                    str(p["step"]),
+                    p["ws_app_title"],
+                    p.get("doc_group_name", "—") or "—",
+                    p.get("keyword", ""),
+                    f"{p.get('confidence', 0):.0%}",
+                    p.get("match_reason", ""),
+                )
+            console.print(table)
 
         console.print("\n[bold]可直接执行:[/bold]")
         for p in plan:
-            filters_str = json.dumps(p["filters"], ensure_ascii=False)
-            console.print(
-                f"  [dim]# 步骤{p['step']}: {p['ws_app_title']} — {p.get('match_reason', '')}[/dim]\n"
-                f"  emoo data search -k \"{p['keyword']}\" -f '{filters_str}'"
-            )
+            filters_str = json.dumps(p.get("filters", []), ensure_ascii=False)
+            if p.get("type") == "aggregate":
+                parts = [f"emoo data aggregate -m {p.get('metric_type', 'count')}"]
+                if p.get("metric_field"):
+                    parts.append(f'--field "{p["metric_field"]}"')
+                if p.get("group_by_field"):
+                    parts.append(f'--group-by "{p["group_by_field"]}"')
+                if p.get("group_by_interval"):
+                    parts.append(f'--interval {p["group_by_interval"]}')
+                parts.append(f"-f '{filters_str}'")
+                console.print(
+                    f"  [dim]# 步骤{p['step']}: {p.get('ws_app_title', '')} — {p.get('match_reason', '')}[/dim]\n"
+                    f"  {' '.join(parts)}"
+                )
+            else:
+                console.print(
+                    f"  [dim]# 步骤{p['step']}: {p['ws_app_title']} — {p.get('match_reason', '')}[/dim]\n"
+                    f"  emoo data search -k \"{p.get('keyword', '')}\" -f '{filters_str}'"
+                )
 
     if output_file:
         result["plan"] = plan
@@ -658,8 +729,10 @@ def intent(ctx, query, km_path, top, output_file):
 @click.option("--step", type=int, default=None, help="只执行某一步")
 @click.option("--max-per-step", default=200, help="每步最多返回结果数 (默认200)")
 @click.option("--csv", "csv_path", default=None, help="导出 CSV 文件路径")
+@click.option("--fallback", is_flag=True, default=False,
+              help="聚合无结果时自动执行 fallback_plan 文档搜索")
 @click.pass_context
-def search(ctx, plan_file, step, max_per_step, csv_path):
+def search(ctx, plan_file, step, max_per_step, csv_path, fallback):
     """执行搜索方案，聚合多 app 结果.
 
     接收 intent 命令输出的搜索方案 JSON，按顺序执行多应用搜索并聚合结果。
@@ -687,7 +760,8 @@ def search(ctx, plan_file, step, max_per_step, csv_path):
         steps = [s for s in steps if s.get("step") == step]
     _progress(f"执行 {len(steps)} 个搜索步骤...")
 
-    outcome = execute_search_plan(client, plan, step=step, max_per_step=max_per_step)
+    outcome = execute_search_plan(client, plan, step=step, max_per_step=max_per_step,
+                                  fallback=fallback)
 
     if ctx.obj.get("as_json"):
         click.echo(json.dumps(outcome, ensure_ascii=False, indent=2))
@@ -700,11 +774,37 @@ def search(ctx, plan_file, step, max_per_step, csv_path):
             for err in outcome["errors"]:
                 console.print(f"[red]错误: {err}[/red]")
 
+        aggregates = outcome.get("aggregates", [])
+        for agg in aggregates:
+            title = (f"{agg.get('_app_title', '')} / "
+                     f"{agg.get('_doc_group_name', '—') or '—'} — "
+                     f"{agg.get('_metric_type', '')}")
+            table = Table(title=title)
+            table.add_column("key")
+            table.add_column("doc_count")
+            table.add_column("metric_value")
+            table.add_column("values")
+            for bucket in agg.get("buckets") or []:
+                table.add_row(
+                    str(bucket.get("key", "")),
+                    str(bucket.get("doc_count", "")),
+                    str(bucket.get("metric_value", "")),
+                    ", ".join(map(str, bucket.get("values") or [])),
+                )
+            console.print(table)
+            if agg.get("total_docs") is not None:
+                console.print(f"[dim]匹配文档数: {agg.get('total_docs')} | "
+                              f"字段: {agg.get('_metric_field') or '—'} | "
+                              f"分组: {agg.get('_group_by_field') or '—'}[/dim]")
+            if agg.get("note"):
+                console.print(f"[yellow]{agg['note']}[/yellow]")
+            if agg.get("truncated"):
+                console.print("[yellow]⚠ 已触达分组/枚举上限，结果可能不完整[/yellow]")
+
         results = outcome.get("results", [])
-        if not results:
-            console.print("[dim]无结果[/dim]")
-        else:
-            console.print(f"\n共 {outcome['total_results']} 条结果 ({outcome['steps_executed']} 个步骤)")
+        if results:
+            console.print(f"\n共 {outcome['total_results']} 条搜索结果 "
+                          f"({outcome['steps_executed']} 个步骤)")
 
             table = Table(title="搜索结果")
             table.add_column("#", justify="right")
@@ -722,9 +822,20 @@ def search(ctx, plan_file, step, max_per_step, csv_path):
 
             if len(results) > 50:
                 console.print(f"[dim]... 还有 {len(results) - 50} 条结果[/dim]")
+        elif not aggregates:
+            console.print("[dim]无结果[/dim]")
 
     if csv_path:
-        path = export_results_csv(outcome, csv_path)
+        if outcome.get("aggregates") and not outcome.get("results"):
+            path = export_aggregates_csv(outcome, csv_path)
+        elif outcome.get("aggregates"):
+            path = export_results_csv(outcome, csv_path)
+            agg_path = (csv_path[:-4] + "_aggregates.csv"
+                        if csv_path.endswith(".csv") else csv_path + "_aggregates.csv")
+            export_aggregates_csv(outcome, agg_path)
+            _progress(f"聚合 CSV 已导出: {agg_path}")
+        else:
+            path = export_results_csv(outcome, csv_path)
         _progress(f"CSV 已导出: {path}")
 
 

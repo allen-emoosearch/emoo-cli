@@ -2,7 +2,9 @@
 
 EMOO 开放平台命令行工具，覆盖鉴权、通讯录、数据搜索/聚合、对话、消息推送、工作项/待办、个人快捷方式、EMOO Base、Agent/角色/权限、知识库文件等全部 OpenAPI 接口。
 
-> **v0.2.0 (2026-10-17)**：同步远端 73 个 API 操作。新增 `todo`（工作项）、`shortcut`（快捷方式）、`data aggregate`（聚合统计）、`message batch/status/status-query`（推送回调闭环）、`file register/permission/extract`（知识库文件）、`chat agent-send`、`contact/role batch-get`、`role members-list`，以及 Agent `data_auth` 数据源权限。`src/commands/endpoints.json` 改由 `scripts/sync_api_docs.py` 自动生成。
+> **v0.3.0 (2026-10-17)**：知识图谱 v2 + 聚合意图管线。KM 改用 `/data` 精确采样并发现文档字段（含 `明细.*.金额` 嵌套列），`skill pipeline intent` 自动识别合计/平均/最高/排名/趋势/数量等统计意图并生成 `aggregate` 步骤，`skill pipeline search` 可直接执行聚合，支持 `--fallback` 回退文档搜索。旧版 KM 缓存会因 `schema_version` 不匹配自动重建。
+>
+> **v0.2.0 (2026-10-17)**：同步远端 73 个 API 操作。新增 `todo`、`shortcut`、`data aggregate`、`message batch/status/status-query`、`file register/permission/extract`、`chat agent-send`、`contact/role batch-get`、`role members-list`、Agent `data_auth`。`src/commands/endpoints.json` 改由 `scripts/sync_api_docs.py` 自动生成。
 
 ## 安装
 
@@ -714,6 +716,8 @@ base 还包含表/列/权限管理子命令（详见下文 [命令速查](#命�
 
 #### `emoo app overview`
 
+> **Legacy**：推荐使用 `emoo skill pipeline knowledge-map`（它会发现字段并支持聚合意图）。本命令保留用于只关心 `ws_app_key → 文档标题` 的轻量场景。
+
 遍历文档，按 ws_app_key 分组生成 markdown 知识地图，列出每个应用的文档数和示例内容。
 
 | 参数 | 必填 | 默认值 | 说明 |
@@ -902,28 +906,62 @@ emoo skill pipeline intent <query>   →  分析意图，输出搜索方案
 emoo skill pipeline search -p plan   →  执行搜索方案，聚合结果
 ```
 
-**pipeline knowledge-map** — 扫描工作区，采样文档标题，生成知识图谱。
+**pipeline knowledge-map** — 扫描工作区，使用 `/data` + filter 精确采样真实文档，并发现可聚合字段（schema v2）。
 
 ```bash
 emoo skill pipeline knowledge-map
 emoo skill pipeline knowledge-map --max-sample-per-group 10 -o /tmp/km
+emoo skill pipeline knowledge-map --refresh      # 强制重建
+emoo skill pipeline knowledge-map --skip-base    # 跳过 Base 表嗅探，只建文档 KM（更快）
+
+# 缓存带 schema_version；旧版 KM (v1) 会自动失效并重建
 ```
 
-**pipeline intent** — 自然语言意图分析，支持中文时间表达（`3月`、`最近7天`、`上周`等）。
+KM 的每个文档组现在包含：
+
+- `sample_titles` — 真实文档标题
+- `fields` — 从文档 `content` 提取的字段目录，含 `path` / `type` / `values`
+- 嵌套列路径，如 `菜品明细.*.金额`
+- 应用级 `fields` 合并目录
+
+**pipeline intent** — 自然语言意图分析，支持中文时间表达（`3月`、`近一周`、`近一个月`、`上月`、`上个季度`等）。
 
 ```bash
+# 普通文档搜索意图
 emoo skill pipeline intent "示例门店店3月营收"
 emoo skill pipeline intent "最近7天品项销售" --top 3 -o plan.json
+
+# 聚合统计意图（自动识别 合计/平均/最高/排名/趋势/数量）
+emoo skill pipeline intent "各门店采购金额合计"
+emoo skill pipeline intent "近一周各门店单量"
+emoo skill pipeline intent "按月统计各门店消费总额"
+emoo skill pipeline intent "各门店消费总额排名"
 ```
 
-**pipeline search** — 执行搜索方案，聚合多 app 结果。
+聚合意图会输出 `type=aggregate` 的 plan 步骤：
+
+```json
+{
+  "type": "aggregate",
+  "metric_type": "sum",
+  "metric_field": "实收金额",
+  "group_by_field": "门店名称",
+  "group_by_interval": null,
+  "filters": [[...]]
+}
+```
+
+**pipeline search** — 执行搜索方案；支持 `type=aggregate` 与普通搜索步骤。
 
 ```bash
 emoo skill pipeline search -p plan.json
 emoo skill pipeline search -p plan.json --csv output.csv
+emoo skill pipeline search -p plan.json --fallback   # 聚合无结果时回退文档搜索
 # 管道模式
-emoo skill pipeline intent "营收" -o plan.json && emoo skill pipeline search -p plan.json
+emoo skill pipeline intent "各门店采购金额合计" -o plan.json && emoo skill pipeline search -p plan.json
 ```
+
+`--csv` 导出聚合结果时，列包含 `key / doc_count / metric_value / values / _metric_field / _group_by_field`。
 
 ---
 
@@ -1569,6 +1607,8 @@ python scripts/sync_api_docs.py        # 抓取远端 + 生成下列文件
 python scripts/sync_api_docs.py --check   # 只比对 registry，有差异退出码 1
 python scripts/sync_api_docs.py --offline # 复用 .cache/emoo-docs
 python scripts/check_coverage.py        # 校验每个端点都有对应 L2 命令
+python scripts/test_pipeline.py         # KM v2 / 聚合意图单测（无网络）
+python scripts/smoke_test.py            # 只读接口冒烟测试
 ```
 
 生成文件（不要手改）：

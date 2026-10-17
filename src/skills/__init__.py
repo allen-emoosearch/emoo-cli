@@ -2,8 +2,9 @@
 
 Skills are a three-stage pipeline:
   1. knowledge-map: scan workspace, generate structured app/doc-group map
-  2. intent: analyze natural-language queries against the map, output a search plan
-  3. search: execute multi-app search plans and aggregate results
+  2. intent: analyze natural-language queries against the map, output a search
+     or aggregate plan (sum/avg/count/max/min/values/trend/ranking)
+  3. search: execute multi-app search or aggregate plans, with optional fallback
 """
 
 from .knowledge_map import generate_knowledge_map
