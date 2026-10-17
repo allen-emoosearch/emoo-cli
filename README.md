@@ -416,6 +416,9 @@ emoo --user-id <id> data aggregate -m count --group-by 签约日 --interval mont
 emoo --user-id <id> data aggregate -m values --field 工号
 ```
 
+> 不知道字段名？先跑 `emoo skill pipeline knowledge-map`，KM v2 会发现文档字段；再用
+> `emoo skill pipeline intent "各门店采购金额合计"` 自动生成 `metric_field` / `group_by_field`。
+
 ---
 
 ### chat — 对话管理
@@ -901,9 +904,9 @@ emoo skill register --unregister # 取消注册
 三段式智能搜索流水线（子命令组），自动适配不同客户的数据环境。
 
 ```
-emoo skill pipeline knowledge-map    →  生成增强知识图谱 (JSON + MD)
-emoo skill pipeline intent <query>   →  分析意图，输出搜索方案
-emoo skill pipeline search -p plan   →  执行搜索方案，聚合结果
+emoo skill pipeline knowledge-map    →  生成知识图谱 v2 (文档字段目录 + Base 表)
+emoo skill pipeline intent <query>   →  分析意图，输出搜索或聚合方案
+emoo skill pipeline search -p plan   →  执行搜索/聚合方案
 ```
 
 **pipeline knowledge-map** — 扫描工作区，使用 `/data` + filter 精确采样真实文档，并发现可聚合字段（schema v2）。
@@ -1136,6 +1139,14 @@ emoo data get --stream 2>progress.log | jq -c 'select(.ws_app.title | test("POS"
 EMOO CLI 的 stdout/stderr 分离设计使其非常适合管道式数据分析：
 
 ```bash
+# 模式 0: 服务端聚合，不拉明细文档
+emoo --json data aggregate -m count --group-by 门店名称 \
+  -f '[[{"field":"ws_app.ws_app_key","operator":"eq","value":"abc123"}]]'
+
+# 模式 0b: 让 KM v2 自动选字段 + 分组
+emoo skill pipeline intent "各门店采购金额合计" -o plan.json
+emoo skill pipeline search -p plan.json
+
 # 模式 1: 拉取全部数据后用 jq 聚合
 emoo --json data get --max-results 10000 > /tmp/data.json
 jq '.data.results' /tmp/data.json | jq -s '
@@ -1336,9 +1347,11 @@ emoo skill show <name>                     显示 skill MD 内容
 emoo skill run <name> [--params ...]       执行 skill 搜索
 emoo skill create <name>                   创建新 skill (脚手架)
 emoo skill register                        注册/取消注册 Claude Code
-emoo skill pipeline knowledge-map          生成增强知识图谱
-emoo skill pipeline intent "查询意图"      分析意图，输出搜索方案
-emoo skill pipeline search -p plan.json    执行搜索方案，聚合多 app 结果
+emoo skill pipeline knowledge-map          生成知识图谱 v2 (字段目录)
+emoo skill pipeline knowledge-map --skip-base  只建文档 KM (跳过 Base 表，更快)
+emoo skill pipeline intent "各门店单量"    分析意图 → 搜索/聚合方案
+emoo skill pipeline search -p plan.json    执行搜索/聚合方案
+emoo skill pipeline search -p plan --fallback  聚合无结果时回退搜索
 
 emoo contact list                          获取通讯录成员 (分页+关键词)
 emoo contact update <open_id>              更新成员信息 (用户名/扩展信息)

@@ -60,11 +60,15 @@ emoo data search -k "关键词" -f '{"field":"ws_app.ws_app_key","operator":"eq"
 emoo base record-list --table-name "表名" -f "content:contains:关键词"
 ```
 
-### 数量/金额/趋势 → data aggregate
+### 数量/金额/趋势 → data aggregate / 聚合意图
 ```bash
 emoo data aggregate -m count --group-by 部门
 emoo data aggregate -m sum --field 合同金额
 emoo data aggregate -m count --group-by 签约日 --interval month
+
+# KM v2 可自动选字段/分组
+emoo skill pipeline intent "各门店采购金额合计" -o plan.json
+emoo skill pipeline search -p plan.json
 ```
 
 ## 时间表达支持

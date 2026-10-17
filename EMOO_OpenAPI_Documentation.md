@@ -8,6 +8,7 @@
 > **接口总数:** 73 个操作
 
 > 本文由 `python scripts/sync_api_docs.py` 从远端 `llms.txt` 自动生成，请勿手工编辑。
+> 知识图谱 v2 / 聚合意图管线用法见 `README.md` 与 `CLAUDE.md`。
 
 ## 快速导航
 

@@ -61,9 +61,9 @@ emoo skill show <name>                            # 显示 skill MD 内容
 emoo skill run <name> [--params ...]              # 执行 skill 搜索
 emoo skill create <name>                          # 创建 skill 脚手架
 emoo skill register [--unregister]                # Claude Code 集成注册/取消
-emoo skill pipeline knowledge-map                 # 生成增强知识图谱 (JSON + MD)
-emoo skill pipeline intent "<query>"              # 意图分析 → 搜索方案
-emoo skill pipeline search -p plan.json           # 执行搜索方案，聚合多 app
+emoo skill pipeline knowledge-map [--skip-base]   # 生成知识图谱 v2 (字段目录)
+emoo skill pipeline intent "<query>"              # 意图分析 → 搜索/聚合方案
+emoo skill pipeline search -p plan.json [--fallback]  # 执行搜索/聚合方案
 
 emoo contact list [--keyword <kw>] [--page-size 50] [--current-page 1]
 emoo contact update <open_id> [--username <name>] [--ext-info '<json>']

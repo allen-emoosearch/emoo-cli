@@ -37,8 +37,9 @@ emoo auth login --api-key <your-api-key>
 # 2. 初始化 skills + 注册到 Claude Code
 emoo skill init
 
-# 3. 生成知识图谱 (后续搜索的基石，缓存 24h)
+# 3. 生成知识图谱 (后续搜索/聚合的基石，缓存 24h)
 emoo skill pipeline knowledge-map --auto --ttl 24h
+# 只做文档搜索/聚合、想更快时可加 --skip-base
 ```
 
 ## 搜索策略 (必须按此顺序)

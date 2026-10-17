@@ -3,7 +3,8 @@
 
 The docs site exposes an llms.txt index plus one Markdown file per endpoint.
 Each Markdown file embeds an OpenAPI YAML fragment. This script merges those
-fragments into a single spec and regenerates src/commands/endpoints.json.
+fragments into a single spec, regenerates src/commands/endpoints.json, and
+renders the human-readable EMOO_OpenAPI_Documentation.md reference.
 
 Usage:
     python scripts/sync_api_docs.py                # fetch + regenerate
@@ -546,6 +547,7 @@ def render_markdown(spec: dict, registry: dict) -> str:
         f"> **接口总数:** {len(registry)} 个操作",
         "",
         "> 本文由 `python scripts/sync_api_docs.py` 从远端 `llms.txt` 自动生成，请勿手工编辑。",
+        "> 知识图谱 v2 / 聚合意图管线用法见 `README.md` 与 `CLAUDE.md`。",
         "",
         "## 快速导航",
         "",
