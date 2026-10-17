@@ -4,6 +4,9 @@
 > **认证方式:** Bearer Token (HTTP `Authorization: Bearer <token>`)
 > **文档来源:** https://open.emooai.com
 > **生成日期:** 2026-05-29
+>
+> ⚠️ 本文是早期人读版（v0.1.x）。最新完整 OpenAPI 规范见 `docs/openapi.json`
+> （由 `python scripts/sync_api_docs.py` 从远端 `llms.txt` 自动生成，2026-10-17 共 73 个操作）。
 
 ---
 

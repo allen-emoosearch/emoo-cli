@@ -63,15 +63,37 @@ emoo skill pipeline search -p plan.json           # 执行搜索方案，聚合�
 
 emoo contact list [--keyword <kw>] [--page-size 50] [--current-page 1]
 emoo contact update <open_id> [--username <name>] [--ext-info '<json>']
+emoo contact batch-get <open_id...>                  # 批量查用户 (≤100, 缺失静默省略)
 
 emoo data search -k <keyword> [--page-size 20] [--current-page 1] [--text-format plain|markdown] [-f '<filter>'] [--max-results <N>]
 emoo data get [--page-size 50] [--cursor <cursor>] [--text-format plain|markdown] [-f '<filter>'] [--max-results <N>]
+emoo data aggregate -m count|sum|avg|min|max|values [--field <f>] [--group-by <f>] [--interval day|week|month|quarter|year] [-f '<filter>']
 
 emoo chat list [--page-size 50] [--current-page 1]
 emoo chat create [--title <title>]
 emoo chat send -q <query> [--chat-id <id>] [--ws-agent-key <key>] [--file-list "a,b"]
+emoo chat agent-send --chat-id <id> -c <markdown>    # Agent 主动推送会话消息
 
-emoo message push -t normal|agent -c <content> [--from-title <t>] [--agent-key <k>] [--dry-run]
+emoo message push -t normal|agent -c <content> [--thread-key <k>] [--due-at <iso>] [--from-title <t>] [--agent-key <k>] [--dry-run]
+emoo message batch -f <messages.json>                # 批量推送 (≤50, 逐条结果)
+emoo message status <thread_key...> --status resolved|reopened   # 核销/复活 (≤100, 幂等)
+emoo message status-query <thread_key...>            # 对账查询各收件人状态
+
+emoo todo list [--scope pending|done] [--tag-id <id>] [--not-taged]
+emoo todo create -c <content> [--due-at <iso>] [--tag-id <id>]
+emoo todo update <item_id> [--content <c>] [--due-at <iso>|--clear-due-at] [--remind-at <iso>|--clear-remind-at] [--tag-id <id>] [--status pending|done]
+emoo todo delete <item_id> -f
+emoo todo tag-list
+emoo todo tag-create -n <name> --color '#FFFFFF'
+emoo todo tag-update <tag_id> -n <name> --color '#FFFFFF'
+emoo todo tag-delete <tag_id> -f
+emoo todo tag-reorder <tag_id...>
+
+emoo shortcut list
+emoo shortcut create -t <title> -u <url>
+emoo shortcut update <id> -t <title> -u <url>
+emoo shortcut delete <id> -f
+emoo shortcut reorder <id...>
 
 emoo base record-create --table-name <name> -r '<json-array>'
 emoo base record-update --table-name <name> --record-key <key> -f '<json>'
@@ -93,8 +115,9 @@ emoo base permission delete <role_key> --table-key <key> -f
 
 emoo agent list [--page-size 20] [--agent-type webhook]   # Agent 列表
 emoo agent create -n <name> -t <type> -c '<config-json>'   # 创建 Agent
-emoo agent get <ws_agent_key>                              # Agent 详情
-emoo agent update <ws_agent_key> --title <new>             # 更新 Agent
+emoo agent create ... --data-auth include_specified_data --ws-app-keys <k> [--doc-group-ids <ids>] [--doc-ids <ids>]
+emoo agent get <ws_agent_key>                              # Agent 详情 (含 data_auth)
+emoo agent update <ws_agent_key> --title <new> [--data-auth all]   # 更新 Agent
 emoo agent delete <ws_agent_key> -f                        # 删除 Agent
 
 emoo role list [--page-size 20] [--keyword <kw>]           # 角色列表
@@ -103,6 +126,8 @@ emoo role update <id> [--name <new>] [--desc <new>]        # 更新角色
 emoo role delete <id> -f                                   # 删除角色
 emoo role members-add <id> <open_id...>                    # 批量添加成员
 emoo role members-remove <id> <open_id>                    # 移除成员
+emoo role members-list <id> [--page-size 50]               # 角色成员列表
+emoo role batch-get <id...>                                # 批量查角色 (≤100)
 
 emoo folder list [--folder-id <id>]                        # 列出 folder 内容
 emoo folder create -n <name> [--parent-id <id>]            # 创建 folder (限超管)
@@ -112,6 +137,11 @@ emoo folder delete -f <id>                                 # 删除 folder (级�
 emoo file credentials -f '<files-json>'                    # 获取上传凭证 (1-20个)
 emoo file confirm -f '<files-json>'                        # 确认上传完成
 emoo file download-url <file_key>                          # 获取下载链接 (24h)
+emoo file register --file-key <k> --file-name <n> --file-size <bytes> [--folder-id <id>]  # 登记知识库文件
+emoo file delete <doc_key> -f                              # 删除知识库文件 (软删除)
+emoo file permission-get <doc_key>                         # 读取文件权限
+emoo file permission-set <doc_key> --visible-type all|none|specified ...  # 设置文件权限
+emoo file extract <file_key...> [--output-dir <dir>]       # 解析文件为文本 (≤20)
 
 ## Base 字段类型写入格式
 
@@ -254,6 +284,21 @@ emoo skill pipeline intent "示例门店店3月营收"
 emoo skill pipeline search -p plan.json --csv output.csv
 ```
 
+## API docs sync (v0.2.0)
+
+The live API is documented at `https://open.emooai.com/llms.txt` (llms.txt + one
+Markdown file per endpoint, each embedding an OpenAPI YAML fragment).
+
+```bash
+pip install pyyaml                  # dev-only dependency
+python scripts/sync_api_docs.py     # fetch + regenerate docs/openapi.json + src/commands/endpoints.json
+python scripts/sync_api_docs.py --offline   # reuse .cache/emoo-docs
+python scripts/sync_api_docs.py --check     # exit 1 when the registry is stale
+```
+
+`src/commands/endpoints.json` is generated — do not hand-edit it. Add new
+operations to `KEY_MAP` in the sync script instead.
+
 ## File structure
 
 ```
@@ -266,18 +311,20 @@ src/
     auth.py                 # auth login / status / set-default-user-id / set-base-url
     api.py                  # L3 passthrough (GET/POST/PUT/DELETE)
     schema_cmd.py           # schema list / <endpoint> introspection
-    endpoints.json          # 46 endpoint schemas (method, path, params, body, response)
-    data.py                 # data search / get
-    chat.py                 # chat list / create / send (with --dry-run)
-    message.py              # message push (with --dry-run)
-    contact.py              # contact list / update
+    endpoints.json          # 73 endpoint schemas, generated by scripts/sync_api_docs.py
+    data.py                 # data search / get / aggregate
+    chat.py                 # chat list / create / send / agent-send
+    message.py              # message push / batch / status / status-query
+    contact.py              # contact list / update / batch-get
+    work_item.py            # todo list/create/update/delete + tag-* (9 commands)
+    shortcut.py             # shortcut list/create/update/delete/reorder (5 commands)
     app.py                  # app overview / list / doc-groups
     skill.py                # skill init/list/show/run/create/register + pipeline sub-group
     base.py                 # base record/table/column/permission CRUD (17 commands)
     agent.py                # agent list/create/get/update/delete (5 commands)
-    role.py                 # role list/create/update/delete + members-add/remove (6 commands)
+    role.py                 # role CRUD + members-add/remove/list + batch-get (8 commands)
     folder.py               # folder list/create/update/delete (4 commands, 限超管)
-    file.py                 # file credentials/confirm/download-url (3 commands)
+    file.py                 # file credentials/confirm/download-url + kb-file/permission/extract (8 commands)
   skills/
     loader.py               # MD skill parser (YAML frontmatter)
     runner.py               # Skill executor (template → app resolve → search → CSV)

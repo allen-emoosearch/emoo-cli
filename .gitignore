@@ -21,3 +21,6 @@ build/
 .DS_Store
 Thumbs.db
 OpenAPI调用指南.pdf
+
+# Local docs sync cache
+.cache/

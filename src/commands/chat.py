@@ -86,3 +86,21 @@ def send(ctx, query, chat_id, file_list, ws_agent_key, dry_run):
             click.echo(inner.get("complete_response", ""))
         else:
             output(resp)
+
+
+@chat.command("agent-send")
+@click.option("--chat-id", type=int, required=True, help="目标会话 ID (必须是当前 agent 归属的会话)")
+@click.option("--content", "-c", required=True, help="markdown 文本内容")
+@click.option("--dry-run", is_flag=True)
+@click.pass_context
+def agent_send(ctx, chat_id, content, dry_run):
+    """Agent 主动推送消息到会话 (服务间调用，追加 assistant 消息)。"""
+    body = {"chat_id": chat_id, "content": content}
+
+    if dry_run:
+        _dry_run_output(ctx, "POST", "/chat/agent-messages", body)
+        return
+
+    client = EmooClient(base_url=ctx.obj.get("base_url"), user_id=ctx.obj.get("user_id"))
+    resp = client.post("/chat/agent-messages", body=body)
+    success(resp, as_json=ctx.obj.get("as_json", False))

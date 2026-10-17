@@ -47,3 +47,31 @@ def update(ctx, open_id, username, ext_info):
     client = EmooClient(base_url=ctx.obj.get("base_url"), user_id=ctx.obj.get("user_id"))
     resp = client.put("/ws-user", body=body)
     output(resp, as_json=ctx.obj.get("as_json", False))
+
+
+@contact.command("batch-get")
+@click.argument("open_ids", nargs=-1)
+@click.option("--file", "-f", "from_file", default=None,
+              help="从文件读取 open_id (每行一个，或 JSON 数组)")
+@click.pass_context
+def batch_get(ctx, open_ids, from_file):
+    """批量按 open_id 查询用户 (≤100，按请求顺序返回，缺失项静默省略)。"""
+    ids = [i for i in open_ids]
+    if from_file:
+        with open(from_file, encoding="utf-8") as f:
+            text = f.read().strip()
+        if text.startswith("["):
+            import json
+            ids.extend(json.loads(text))
+        else:
+            ids.extend(line.strip() for line in text.splitlines() if line.strip())
+    ids = [str(i) for i in dict.fromkeys(str(i) for i in ids if i)]
+    if not ids:
+        raise click.BadParameter("未指定 open_id")
+    if len(ids) > 100:
+        raise click.BadParameter(f"open_id 最多 100 个，当前 {len(ids)}")
+
+    client = EmooClient(base_url=ctx.obj.get("base_url"), user_id=ctx.obj.get("user_id"))
+    resp = client.request("POST", "/ws-user/batch-get", body={"open_ids": ids})
+    output(resp, as_json=ctx.obj.get("as_json", False),
+           columns=["open_id", "ws_username", "email", "mobile_num", "ws_user_type", "is_active"])

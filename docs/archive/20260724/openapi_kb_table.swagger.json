@@ -1,0 +1,553 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "emoo 表与列管理 OpenAPI",
+    "version": "1.1.0",
+    "description": "管理数据表（base table）及其列（column）的 schema：建表 / 列表 / 详情 / 更新 / 删除，以及列的增删改。\n\n- 每张表必属于一个知识库（ws_app，类型为 DATABASE），通过 Bearer token 关联当前 workspace 与 ws_app。\n- 表可挂到文件夹（folder）下：创建时通过 `folder_id` 指定；更新时通过 `folder_id` 移动或清空（传 null = 移出文件夹）。\n- `table_key`（推荐）与 `table_name` 二选一定位表；`column_key`（推荐）与 `column_name` 二选一定位列。\n- reference 列通过 `reference_table_key` 或 `reference_table_name` 二选一定位关联表（互斥）。\n- 每个表最多 300 个活跃列（超出返 4139）。\n- 所有写操作均为软删除，删除后可通过管理后台恢复。",
+    "contact": { "name": "emoo", "url": "https://open.emooai.com" }
+  },
+  "servers": [
+    { "url": "http://localhost:8000/open-api/v1", "description": "本地开发" },
+    { "url": "https://app.emooai.com/open-api/v1", "description": "SaaS 生产" }
+  ],
+  "components": {
+    "securitySchemes": {
+      "BearerAuth": { "type": "http", "scheme": "bearer", "description": "Access Token 或 API Key（emoo_ 开头），格式：Bearer <token>" }
+    },
+    "schemas": {
+      "ColumnDef": {
+        "type": "object",
+        "description": "列定义（建表或加列时使用）。reference_table_key 与 reference_table_name 互斥",
+        "properties": {
+          "column_name": { "type": "string", "description": "列名称" },
+          "type": { "type": "string", "enum": ["string", "number", "boolean", "date", "time", "datetime", "select", "user", "group", "file", "reference"], "description": "列类型" },
+          "title_column": { "type": "boolean", "default": false, "description": "是否为标题列" },
+          "multiple": { "type": "boolean", "default": false, "description": "是否多选" },
+          "reference_table_key": { "type": "string", "nullable": true, "description": "关联表的 table_key（reference 类型时使用，与 reference_table_name 互斥）" },
+          "reference_table_name": { "type": "string", "nullable": true, "description": "关联表的 table_name（与 reference_table_key 互斥）" },
+          "options": { "type": "object", "nullable": true, "description": "列选项（select 类型时使用），结构：{ \"options\": [{ \"label\": \"技术部\", \"value\": \"1\" }] }" },
+          "extra": { "type": "object", "nullable": true, "description": "扩展元数据" }
+        },
+        "required": ["column_name", "type"]
+      },
+      "ColumnInfo": {
+        "type": "object",
+        "description": "列完整信息",
+        "properties": {
+          "column_key": { "type": "string", "description": "列唯一标识" },
+          "column_name": { "type": "string", "description": "列名称" },
+          "type": { "type": "string", "enum": ["string", "number", "boolean", "date", "time", "datetime", "select", "user", "group", "file", "reference"] },
+          "table_key": { "type": "string", "description": "所属表 key" },
+          "title_column": { "type": "boolean" },
+          "multiple": { "type": "boolean" },
+          "order": { "type": "integer", "description": "列顺序" },
+          "reference_table_key": { "type": "string", "nullable": true },
+          "reference_table_name": { "type": "string", "nullable": true },
+          "options": { "type": "object", "nullable": true },
+          "extra": { "type": "object", "nullable": true },
+          "created_at": { "type": "string", "format": "date-time" },
+          "updated_at": { "type": "string", "format": "date-time" }
+        }
+      },
+      "TableInfo": {
+        "type": "object",
+        "description": "数据表信息",
+        "properties": {
+          "table_key": { "type": "string", "description": "表唯一标识" },
+          "table_name": { "type": "string", "description": "表名称" },
+          "folder_id": { "type": "integer", "nullable": true, "description": "所属文件夹 ID，null = 未分类" },
+          "extra": { "type": "object", "nullable": true, "description": "扩展元数据" },
+          "column_count": { "type": "integer", "description": "列数量" },
+          "record_count": { "type": "integer", "description": "记录数量" },
+          "created_at": { "type": "string", "format": "date-time" },
+          "updated_at": { "type": "string", "format": "date-time" },
+          "columns": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/ColumnInfo" },
+            "description": "列详情，仅在 get_table / create_table 接口返回"
+          }
+        }
+      },
+      "TableIdentifier": {
+        "type": "object",
+        "description": "表定位：table_key 或 table_name 二选一",
+        "properties": {
+          "table_key": { "type": "string", "description": "表唯一标识（推荐）" },
+          "table_name": { "type": "string", "description": "表名称" }
+        }
+      },
+      "CreateTableRequest": {
+        "type": "object",
+        "description": "创建表请求体",
+        "properties": {
+          "table_name": { "type": "string", "description": "表名称" },
+          "extra": { "type": "object", "nullable": true, "description": "扩展元数据" },
+          "folder_id": { "type": "integer", "minimum": 1, "nullable": true, "description": "所属文件夹 ID，不传为未分类" },
+          "columns": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/ColumnDef" },
+            "description": "初始列定义数组"
+          }
+        },
+        "required": ["table_name"]
+      },
+      "UpdateTableRequest": {
+        "type": "object",
+        "description": "更新表请求体（new_table_name / extra / folder_id 至少传一项）。folder_id 三态：不传=保持不变，传 int=移动到该 folder，传 null=移出文件夹",
+        "allOf": [
+          { "$ref": "#/components/schemas/TableIdentifier" },
+          {
+            "type": "object",
+            "properties": {
+              "new_table_name": { "type": "string", "description": "新的表名称" },
+              "extra": { "type": "object", "nullable": true, "description": "扩展元数据" },
+              "folder_id": { "type": "integer", "minimum": 1, "nullable": true, "description": "移动到指定文件夹；传 null 表示移出文件夹；不传则保持不变" }
+            }
+          }
+        ]
+      },
+      "TableResponse": {
+        "type": "object",
+        "properties": {
+          "code": { "type": "integer", "example": 200 },
+          "message": { "type": "string", "example": "success" },
+          "data": { "$ref": "#/components/schemas/TableInfo" }
+        }
+      },
+      "TableListResponse": {
+        "type": "object",
+        "properties": {
+          "code": { "type": "integer", "example": 200 },
+          "message": { "type": "string", "example": "success" },
+          "data": {
+            "type": "object",
+            "properties": {
+              "total": { "type": "integer" },
+              "page_size": { "type": "integer" },
+              "current_page": { "type": "integer" },
+              "total_pages": { "type": "integer" },
+              "results": { "type": "array", "items": { "$ref": "#/components/schemas/TableInfo" } }
+            }
+          }
+        }
+      },
+      "DeleteResponse": {
+        "type": "object",
+        "properties": {
+          "code": { "type": "integer", "example": 200 },
+          "message": { "type": "string", "example": "success" },
+          "data": {
+            "type": "object",
+            "properties": { "deleted": { "type": "boolean", "example": true } }
+          }
+        }
+      },
+      "AddColumnRequest": {
+        "type": "object",
+        "description": "添加列请求体",
+        "allOf": [
+          { "$ref": "#/components/schemas/TableIdentifier" },
+          {
+            "type": "object",
+            "properties": {
+              "column_name": { "type": "string" },
+              "type": { "type": "string", "enum": ["string", "number", "boolean", "date", "time", "datetime", "select", "user", "group", "file", "reference"] },
+              "title_column": { "type": "boolean", "default": false },
+              "multiple": { "type": "boolean", "default": false },
+              "reference_table_key": { "type": "string", "nullable": true, "description": "与 reference_table_name 互斥" },
+              "reference_table_name": { "type": "string", "nullable": true, "description": "与 reference_table_key 互斥" },
+              "options": { "type": "object", "nullable": true },
+              "extra": { "type": "object", "nullable": true }
+            },
+            "required": ["column_name", "type"]
+          }
+        ]
+      },
+      "UpdateColumnRequest": {
+        "type": "object",
+        "description": "更新列请求体（new_column_name / type / title_column / multiple / reference_table_key / reference_table_name / options / extra 至少传一项）",
+        "allOf": [
+          { "$ref": "#/components/schemas/TableIdentifier" },
+          {
+            "type": "object",
+            "properties": {
+              "column_key": { "type": "string", "description": "列唯一标识（推荐，与 column_name 二选一）" },
+              "column_name": { "type": "string", "description": "列名称（用于定位列）" },
+              "new_column_name": { "type": "string", "description": "新的列名称" },
+              "type": { "type": "string", "enum": ["string", "number", "boolean", "date", "time", "datetime", "select", "user", "group", "file", "reference"] },
+              "title_column": { "type": "boolean" },
+              "multiple": { "type": "boolean" },
+              "reference_table_key": { "type": "string", "nullable": true },
+              "reference_table_name": { "type": "string", "nullable": true },
+              "options": { "type": "object", "nullable": true },
+              "extra": { "type": "object", "nullable": true }
+            }
+          }
+        ]
+      },
+      "DeleteColumnRequest": {
+        "type": "object",
+        "description": "删除列请求体（column_key 或 column_name 二选一）",
+        "allOf": [
+          { "$ref": "#/components/schemas/TableIdentifier" },
+          {
+            "type": "object",
+            "properties": {
+              "column_key": { "type": "string" },
+              "column_name": { "type": "string" }
+            }
+          }
+        ]
+      },
+      "ColumnResponse": {
+        "type": "object",
+        "properties": {
+          "code": { "type": "integer", "example": 200 },
+          "message": { "type": "string", "example": "success" },
+          "data": { "$ref": "#/components/schemas/ColumnInfo" }
+        }
+      },
+      "ErrorResponse": {
+        "type": "object",
+        "description": "业务错误响应（HTTP 状态 200，错误码在 body.code）",
+        "properties": {
+          "code": { "type": "integer", "description": "业务错误码，详见各 endpoint 的 200 响应 description" },
+          "message": { "type": "string" },
+          "data": { "type": "object", "nullable": true }
+        }
+      },
+      "UnauthorizedResponse": {
+        "type": "object",
+        "description": "认证失败（4084）",
+        "properties": {
+          "code": { "type": "integer", "example": 4084 },
+          "message": { "type": "string", "example": "invalid_open_api_user_id" },
+          "data": { "type": "object", "nullable": true }
+        }
+      },
+      "ValidationErrorResponse": {
+        "type": "object",
+        "description": "DRF 字段校验失败响应（HTTP 400，body.code=400 validation_error）。触发场景取决于请求 schema 的字段约束。",
+        "properties": {
+          "code": { "type": "integer", "example": 400 },
+          "message": { "type": "string", "example": "validation_error" },
+          "data": { "type": "object", "nullable": true }
+        }
+      }
+    }
+  },
+  "security": [{ "BearerAuth": [] }],
+  "tags": [
+    { "name": "表管理", "description": "数据表 schema CRUD" },
+    { "name": "列管理", "description": "数据表列 schema CRUD" }
+  ],
+  "paths": {
+    "/data/table": {
+      "post": {
+        "tags": ["表管理"],
+        "summary": "创建数据表",
+        "description": "创建数据表，可同时指定初始列与所属文件夹。创建成功后返回表信息（含列详情）。",
+        "operationId": "createTable",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/CreateTableRequest" },
+              "examples": {
+                "with_folder_and_columns": {
+                  "summary": "建到 folder 12 下并带初始列",
+                  "value": {
+                    "table_name": "员工管理",
+                    "folder_id": 12,
+                    "columns": [
+                      { "column_name": "姓名", "type": "string", "title_column": true },
+                      { "column_name": "年龄", "type": "number" },
+                      { "column_name": "部门", "type": "select", "options": { "options": [{ "label": "技术部", "value": "1" }] } }
+                    ]
+                  }
+                },
+                "minimal": {
+                  "summary": "只传表名（未分类）",
+                  "value": { "table_name": "员工管理" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "成功（code=200）或业务错误（HTTP 仍 200）。可能错误码：\n- 4084 invalid_open_api_user_id\n- 4133 base_table_not_found（columns 内 reference_table_key/name 找不到关联表）\n- 4134 base_table_name_exists（同名表已存在）\n- 4135 base_table_limit_exceeded（表数超 workspace 上限）\n- 4199 base_ws_app_not_found（workspace 无 DATABASE 类型 ws_app）",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/TableResponse" },
+                "examples": {
+                  "success_with_columns": {
+                    "summary": "建到 folder 12 下并带初始列",
+                    "value": {
+                      "code": 200, "message": "success",
+                      "data": {
+                        "table_key": "tb_xxx", "table_name": "员工管理", "folder_id": 12, "extra": null,
+                        "column_count": 1, "record_count": 0,
+                        "created_at": "2026-01-01T00:00:00Z",
+                        "updated_at": "2026-01-01T00:00:00Z",
+                        "columns": [
+                          { "column_key": "fld_xxx", "column_name": "姓名", "type": "string", "table_key": "tb_xxx", "title_column": true, "multiple": false, "order": 0, "reference_table_key": null, "reference_table_name": null, "options": null, "extra": null, "created_at": "2026-01-01T00:00:00Z", "updated_at": "2026-01-01T00:00:00Z" }
+                        ]
+                      }
+                    }
+                  },
+                  "name_exists": {
+                    "description": "4134 同名表已存在",
+                    "value": { "code": 4134, "message": "base_table_name_exists", "data": { "table_name": "员工管理" } }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "认证失败（4084）",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/UnauthorizedResponse" } } }
+          },
+          "400": {
+            "description": "DRF 字段校验失败（HTTP 400，body.code=400 validation_error）。可能场景：table_name 缺失、columns 内 reference_table_key 和 reference_table_name 同传等。",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ValidationErrorResponse" } } }
+          }
+        }
+      },
+      "get": {
+        "tags": ["表管理"],
+        "summary": "获取数据表列表（分页）",
+        "description": "仅返回元数据和列数统计，不含列详情。可通过 folder_id 过滤某文件夹下的表。",
+        "operationId": "listTables",
+        "parameters": [
+          { "name": "page_size", "in": "query", "required": false, "schema": { "type": "integer", "default": 20, "minimum": 1, "maximum": 100 }, "description": "每页数量，默认 20" },
+          { "name": "current_page", "in": "query", "required": false, "schema": { "type": "integer", "default": 1, "minimum": 1 }, "description": "页码，默认 1" },
+          { "name": "folder_id", "in": "query", "required": false, "schema": { "type": "integer", "minimum": 1, "nullable": true }, "description": "按文件夹过滤，不传 / null 则返回全部表" }
+        ],
+        "responses": {
+          "200": {
+            "description": "获取成功（code=200）或业务错误。可能错误码：\n- 4084 invalid_open_api_user_id\n- 4199 base_ws_app_not_found",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/TableListResponse" }
+              }
+            }
+          },
+          "401": {
+            "description": "认证失败（4084）",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/UnauthorizedResponse" } } }
+          },
+          "400": {
+            "description": "DRF 字段校验失败（HTTP 400，body.code=400 validation_error）。可能场景：page_size 超出 1-100 范围、page_size / current_page / folder_id 传非整数。",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ValidationErrorResponse" } } }
+          }
+        }
+      },
+      "put": {
+        "tags": ["表管理"],
+        "summary": "更新数据表",
+        "description": "更新表名 / 扩展元数据 / 所属文件夹，至少提供 `new_table_name`、`extra`、`folder_id` 中的一项。\n\nfolder_id 三态：不传=保持当前；传 int=移动到该 folder；传 null=移出文件夹。",
+        "operationId": "updateTable",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/UpdateTableRequest" },
+              "examples": {
+                "rename": { "summary": "重命名", "value": { "table_key": "tb_xxx", "new_table_name": "员工花名册" } },
+                "update_extra": { "summary": "更新扩展元数据", "value": { "table_key": "tb_xxx", "extra": { "icon": "📋" } } },
+                "move_to_folder": { "summary": "移动到指定文件夹", "value": { "table_key": "tb_xxx", "folder_id": 12 } },
+                "move_to_uncategorized": { "summary": "移出文件夹", "value": { "table_key": "tb_xxx", "folder_id": null } }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "成功（code=200）或业务错误。可能错误码：\n- 4084 invalid_open_api_user_id\n- 4133 base_table_not_found（表不存在）\n- 4205 base_folder_not_found（folder_id 不存在，folder 管理接口定义）\n- 4199 base_ws_app_not_found",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/TableResponse" }
+              }
+            }
+          },
+          "401": {
+            "description": "认证失败（4084）",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/UnauthorizedResponse" } } }
+          },
+          "400": {
+            "description": "DRF 字段校验失败（HTTP 400，body.code=400 validation_error）。可能场景：new_table_name/extra/folder_id 都没传、table_key+table_name 都没传。",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ValidationErrorResponse" } } }
+          }
+        }
+      },
+      "delete": {
+        "tags": ["表管理"],
+        "summary": "删除数据表",
+        "description": "软删除，删除后可通过管理后台恢复。",
+        "operationId": "deleteTable",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/TableIdentifier" },
+              "example": { "table_key": "tb_xxx" }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "成功（code=200）或业务错误。可能错误码：\n- 4084 invalid_open_api_user_id\n- 4133 base_table_not_found\n- 4199 base_ws_app_not_found",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/DeleteResponse" }
+              }
+            }
+          },
+          "401": {
+            "description": "认证失败（4084）",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/UnauthorizedResponse" } } }
+          },
+          "400": {
+            "description": "DRF 字段校验失败（HTTP 400，body.code=400 validation_error）。可能场景：table_key+table_name 都没传。",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ValidationErrorResponse" } } }
+          }
+        }
+      }
+    },
+    "/data/table/detail": {
+      "get": {
+        "tags": ["表管理"],
+        "summary": "获取数据表详情",
+        "description": "返回表元数据及完整列定义。table_key 或 table_name 二选一。",
+        "operationId": "getTable",
+        "parameters": [
+          { "name": "table_key", "in": "query", "required": false, "schema": { "type": "string" }, "description": "表唯一标识（与 table_name 二选一）" },
+          { "name": "table_name", "in": "query", "required": false, "schema": { "type": "string" }, "description": "表名称" }
+        ],
+        "responses": {
+          "200": {
+            "description": "成功（code=200）或业务错误。可能错误码：\n- 4084 invalid_open_api_user_id\n- 4133 base_table_not_found\n- 4199 base_ws_app_not_found",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/TableResponse" }
+              }
+            }
+          },
+          "401": {
+            "description": "认证失败（4084）",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/UnauthorizedResponse" } } }
+          },
+          "400": {
+            "description": "DRF 字段校验失败（HTTP 400，body.code=400 validation_error）。可能场景：table_key+table_name 都没传。",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ValidationErrorResponse" } } }
+          }
+        }
+      }
+    },
+    "/data/table/columns": {
+      "post": {
+        "tags": ["列管理"],
+        "summary": "添加列",
+        "description": "向数据表添加一列。每个表最多 300 个活跃列（超出返 4139）。",
+        "operationId": "addColumn",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/AddColumnRequest" },
+              "examples": {
+                "date_column": { "summary": "添加日期列", "value": { "table_key": "tb_xxx", "column_name": "入职日期", "type": "date" } },
+                "select_column": { "summary": "添加单选列", "value": { "table_key": "tb_xxx", "column_name": "部门", "type": "select", "options": { "options": [{ "label": "技术部", "value": "1" }] } } }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "成功（code=200）或业务错误。可能错误码：\n- 4084 invalid_open_api_user_id\n- 4133 base_table_not_found（目标表或 reference 表不存在）\n- 4138 base_column_name_exists（同表内列名重复）\n- 4139 base_column_limit_exceeded（列数超 300 上限）\n- 4199 base_ws_app_not_found",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ColumnResponse" }
+              }
+            }
+          },
+          "401": {
+            "description": "认证失败（4084）",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/UnauthorizedResponse" } } }
+          },
+          "400": {
+            "description": "DRF 字段校验失败（HTTP 400，body.code=400 validation_error）。可能场景：column_name 缺失、type 非法、reference_table_key 和 reference_table_name 同传、table_key+table_name 都没传。",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ValidationErrorResponse" } } }
+          }
+        }
+      },
+      "put": {
+        "tags": ["列管理"],
+        "summary": "更新列",
+        "description": "更新列属性。column_key/column_name 定位目标列，new_column_name 指定新名称。至少传一项可更新字段。",
+        "operationId": "updateColumn",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/UpdateColumnRequest" },
+              "example": { "table_key": "tb_xxx", "column_key": "fld_zzz", "new_column_name": "所属部门" }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "成功（code=200）或业务错误。可能错误码：\n- 4084 invalid_open_api_user_id\n- 4133 base_table_not_found（目标表或 reference 表不存在）\n- 4137 base_column_not_found（column_key/name 不存在）\n- 4138 base_column_name_exists（new_column_name 已被占用）\n- 4199 base_ws_app_not_found",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ColumnResponse" }
+              }
+            }
+          },
+          "401": {
+            "description": "认证失败（4084）",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/UnauthorizedResponse" } } }
+          },
+          "400": {
+            "description": "DRF 字段校验失败（HTTP 400，body.code=400 validation_error）。可能场景：无任何可更新字段、table_key+table_name 都没传、column_key+column_name 都没传、reference 同时传 key 和 name。",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ValidationErrorResponse" } } }
+          }
+        }
+      },
+      "delete": {
+        "tags": ["列管理"],
+        "summary": "删除列",
+        "description": "软删除。",
+        "operationId": "deleteColumn",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/DeleteColumnRequest" },
+              "example": { "table_key": "tb_xxx", "column_key": "fld_zzz" }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "成功（code=200）或业务错误。可能错误码：\n- 4084 invalid_open_api_user_id\n- 4133 base_table_not_found\n- 4137 base_column_not_found\n- 4199 base_ws_app_not_found",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/DeleteResponse" }
+              }
+            }
+          },
+          "401": {
+            "description": "认证失败（4084）",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/UnauthorizedResponse" } } }
+          },
+          "400": {
+            "description": "DRF 字段校验失败（HTTP 400，body.code=400 validation_error）。可能场景：table_key+table_name 都没传、column_key+column_name 都没传。",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ValidationErrorResponse" } } }
+          }
+        }
+      }
+    }
+  }
+}

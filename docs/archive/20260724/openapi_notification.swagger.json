@@ -1,0 +1,182 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "emoo 消息推送 OpenAPI",
+    "version": "1.1.0",
+    "description": "向工作区成员推送消息，支持两种形态：\n\n- `normal`：普通消息，需带 `normal_message_info`（来源标题 / 图片 / 详情链接）。\n- `agent`：Agent 消息，需带 `agent_message_info`（ws_agent_key / chat_id）。\n\n目标用户优先级：body 中 `emoo_user_id` > 请求头 `Emoo-User-Id`。两者都没有时返 4084。\n\n**content 处理**：\n- normal：原文截断前 300 字落库\n- agent：原文写入 chat 表（assistant 消息），消息表存「去 Markdown 标签后的前 300 字」\n\n需要 WS_MESSAGE ADD 权限。",
+    "contact": { "name": "emoo", "url": "https://open.emooai.com" }
+  },
+  "servers": [
+    { "url": "http://localhost:8000/open-api/v1", "description": "本地开发" },
+    { "url": "https://app.emooai.com/open-api/v1", "description": "SaaS 生产" }
+  ],
+  "components": {
+    "securitySchemes": {
+      "BearerAuth": { "type": "http", "scheme": "bearer", "description": "Access Token 或 API Key（emoo_ 开头），格式：Bearer <token>" }
+    },
+    "schemas": {
+      "NormalMessageInfo": {
+        "type": "object",
+        "description": "普通消息附加信息（message_type=normal 时必填，from_title 必填非空）",
+        "properties": {
+          "from_title": { "type": "string", "description": "来源标题（必填）" },
+          "from_image_url": { "type": "string", "nullable": true, "description": "来源图片 URL，不传时取 workspace 默认 logo" },
+          "detail_link": { "type": "string", "nullable": true, "description": "详情链接" }
+        },
+        "required": ["from_title"]
+      },
+      "AgentMessageInfo": {
+        "type": "object",
+        "description": "Agent 消息附加信息（message_type=agent 时必填，ws_agent_key 必填非空）",
+        "properties": {
+          "ws_agent_key": { "type": "string", "description": "Agent 标识（必填）" },
+          "chat_id": { "type": "string", "nullable": true, "description": "对话 ID；不传或为空串时自动创建新对话。允许传整数字符串（如 \"123\"），后端转 int 失败抛 4015 invalid_chat_id" }
+        },
+        "required": ["ws_agent_key"]
+      },
+      "PushMessageRequest": {
+        "oneOf": [
+          {
+            "type": "object",
+            "description": "普通消息（message_type=normal）",
+            "properties": {
+              "emoo_user_id": { "type": "string", "nullable": true, "description": "目标用户 open_id；不传时取请求头 Emoo-User-Id" },
+              "message_type": { "type": "string", "enum": ["normal"] },
+              "content": { "type": "string", "description": "消息内容（原文截断前 300 字落库）" },
+              "normal_message_info": { "$ref": "#/components/schemas/NormalMessageInfo" }
+            },
+            "required": ["message_type", "content", "normal_message_info"]
+          },
+          {
+            "type": "object",
+            "description": "Agent 消息（message_type=agent）",
+            "properties": {
+              "emoo_user_id": { "type": "string", "nullable": true, "description": "目标用户 open_id；不传时取请求头 Emoo-User-Id" },
+              "message_type": { "type": "string", "enum": ["agent"] },
+              "content": { "type": "string", "description": "消息内容（原文写入 chat 表，前 300 字去 Markdown 后落消息表）" },
+              "agent_message_info": { "$ref": "#/components/schemas/AgentMessageInfo" }
+            },
+            "required": ["message_type", "content", "agent_message_info"]
+          }
+        ]
+      },
+      "PushMessageResponse": {
+        "type": "object",
+        "description": "推送响应。normal 类型 chat_id/chat_message_id 固定为 0；agent 类型返回真实值",
+        "properties": {
+          "code": { "type": "integer", "example": 200 },
+          "message": { "type": "string", "example": "success" },
+          "data": {
+            "type": "object",
+            "properties": {
+              "message_id": { "type": "integer", "description": "消息表记录 ID" },
+              "chat_id": { "type": "integer", "description": "对话 ID；normal=0，agent=真实 chat id" },
+              "chat_message_id": { "type": "integer", "description": "chat 内消息 ID；normal=0，agent=真实 chat_message_id" }
+            },
+            "required": ["message_id", "chat_id", "chat_message_id"]
+          }
+        }
+      },
+      "ErrorResponse": {
+        "type": "object",
+        "description": "业务错误响应（HTTP 状态 200，错误码在 body.code）",
+        "properties": {
+          "code": { "type": "integer" },
+          "message": { "type": "string" },
+          "data": { "type": "object", "nullable": true }
+        }
+      },
+      "UnauthorizedResponse": {
+        "type": "object",
+        "description": "认证失败（4084）",
+        "properties": {
+          "code": { "type": "integer", "example": 4084 },
+          "message": { "type": "string", "example": "invalid_open_api_user_id" },
+          "data": { "type": "object", "nullable": true }
+        }
+      },
+      "ValidationErrorResponse": {
+        "type": "object",
+        "description": "DRF 字段校验失败响应（HTTP 400，body.code=400 validation_error）。触发场景取决于请求 schema 的字段约束（required / maxLength / minItems / enum 等）。",
+        "properties": {
+          "code": { "type": "integer", "example": 400 },
+          "message": { "type": "string", "example": "validation_error" },
+          "data": { "type": "object", "nullable": true }
+        }
+      }
+    }
+  },
+  "security": [{ "BearerAuth": [] }],
+  "tags": [
+    { "name": "消息推送", "description": "向工作区成员推送普通消息或 Agent 消息" }
+  ],
+  "paths": {
+    "/message": {
+      "post": {
+        "tags": ["消息推送"],
+        "summary": "推送消息",
+        "description": "根据 `message_type` 走不同分支：\n\n- `normal`：必须带 `normal_message_info`（from_title 必填）。content 截断前 300 字落消息表。\n- `agent`：必须带 `agent_message_info`（ws_agent_key 必填）。content 原文写入 chat 表（assistant 消息），消息表存「去 Markdown 后的前 300 字」。\n\n目标用户优先取 body 中 `emoo_user_id`，未传时取请求头 `Emoo-User-Id`，两者都没有返 4084。",
+        "operationId": "pushMessage",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/PushMessageRequest" },
+              "examples": {
+                "normal": {
+                  "summary": "普通消息",
+                  "value": {
+                    "message_type": "normal",
+                    "content": "您有一条新通知",
+                    "normal_message_info": { "from_title": "系统通知", "detail_link": "https://example.com/detail" }
+                  }
+                },
+                "agent": {
+                  "summary": "Agent 消息",
+                  "value": {
+                    "emoo_user_id": "ou_xxx",
+                    "message_type": "agent",
+                    "content": "任务已完成",
+                    "agent_message_info": { "ws_agent_key": "agent_xxx" }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "推送成功（code=200）或业务错误（HTTP 仍 200）。可能错误码：\n- 4006 workspace_not_found\n- 4012 data_not_found（emoo_user_id 在 workspace 中找不到用户）\n- 4015 invalid_params（多场景：invalid_message_type / normal_message_from_title_required / agent_message_ws_agent_key_required / invalid_chat_id）\n- 4045 chat_not_found（agent 类型指定的 chat_id 不属于当前用户或 workspace）\n- 4081 ws_agent_not_found（ws_agent_key 存在但不属于当前 workspace）\n- 4084 invalid_open_api_user_id（既无 emoo_user_id 又无 Emoo-User-Id）\n- 4092 invalid_open_api_ws_agent_key（ws_agent_key 不存在）",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/PushMessageResponse" },
+                "examples": {
+                  "normal_success": {
+                    "summary": "normal 推送成功（chat_id=0）",
+                    "value": { "code": 200, "message": "success", "data": { "message_id": 1001, "chat_id": 0, "chat_message_id": 0 } }
+                  },
+                  "agent_success": {
+                    "summary": "agent 推送成功（含 chat_id）",
+                    "value": { "code": 200, "message": "success", "data": { "message_id": 1002, "chat_id": 200, "chat_message_id": 300 } }
+                  },
+                  "invalid_message_type": {
+                    "description": "4015 message_type 非法",
+                    "value": { "code": 4015, "message": "invalid_params", "data": { "reason": "invalid_message_type" } }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "认证失败（4084）",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/UnauthorizedResponse" } } }
+          },
+          "400": {
+            "description": "DRF 字段校验失败（HTTP 400，body.code=400 validation_error）。可能场景：message_type 非法 / message_type=normal 时缺 normal_message_info / message_type=agent 时缺 agent_message_info / content 缺失。",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ValidationErrorResponse" } } }
+          }
+        }
+      }
+    }
+  }
+}

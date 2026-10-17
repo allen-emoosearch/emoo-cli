@@ -1,0 +1,381 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "emoo Agent 管理 OpenAPI",
+    "version": "1.1.0",
+    "description": "管理 workspace 下的第三方集成 agent（webhook / dify / coze / timus）。\n\n凭证字段只写不读：config 中的凭证字段（如 webhook 的 bearer_token、dify 的 api_key 等）写入后无法读取，所有 GET 响应都不返回 config。请创建/更新后立即在本地妥善保存。",
+    "contact": { "name": "emoo", "url": "https://open.emooai.com" }
+  },
+  "servers": [
+    { "url": "http://localhost:8000/open-api/v1", "description": "本地开发" },
+    { "url": "https://app.emooai.com/open-api/v1", "description": "SaaS 生产" }
+  ],
+  "security": [{ "BearerAuth": [] }],
+  "tags": [{ "name": "Agent 管理", "description": "第三方集成 agent 的增删改查" }],
+  "components": {
+    "securitySchemes": {
+      "BearerAuth": { "type": "http", "scheme": "bearer", "description": "Access Token 或 API Key（emoo_ 开头），格式：Bearer <token>" }
+    },
+    "parameters": {
+      "WsAgentKey": {
+        "name": "ws_agent_key",
+        "in": "path",
+        "required": true,
+        "schema": { "type": "string" },
+        "description": "agent 唯一标识"
+      }
+    },
+    "schemas": {
+      "AgentType": {
+        "type": "string",
+        "enum": ["webhook", "dify", "coze", "timus"],
+        "description": "集成类型"
+      },
+      "AgentScope": {
+        "type": "string",
+        "enum": ["public", "specified_ws_groups"],
+        "description": "可见范围：public=全员可用（默认），specified_ws_groups=指定角色可用"
+      },
+      "Agent": {
+        "type": "object",
+        "description": "agent 对象（GET 响应不返回 config）",
+        "properties": {
+          "ws_agent_key": { "type": "string", "description": "agent 唯一标识" },
+          "title": { "type": "string", "description": "agent 显示名称" },
+          "agent_type": { "$ref": "#/components/schemas/AgentType" },
+          "is_enabled": { "type": "boolean", "description": "是否启用" },
+          "description": { "type": "string", "nullable": true, "description": "agent 描述" },
+          "scope": { "$ref": "#/components/schemas/AgentScope" },
+          "specified_ws_group_ids": {
+            "type": "array",
+            "items": { "type": "integer" },
+            "description": "scope=specified_ws_groups 时为角色 id 列表；scope=public 时为空数组"
+          },
+          "created_at": { "type": "string", "format": "date-time" },
+          "updated_at": { "type": "string", "format": "date-time" }
+        }
+      },
+      "CreateAgentRequest": {
+        "type": "object",
+        "required": ["title", "agent_type", "config"],
+        "properties": {
+          "title": { "type": "string", "maxLength": 100, "description": "agent 显示名称" },
+          "agent_type": { "$ref": "#/components/schemas/AgentType" },
+          "config": {
+            "type": "object",
+            "description": "集成配置，按 agent_type 不同有不同结构（见 WebhookConfig / DifyConfig / CozeConfig / TimusConfig）",
+            "oneOf": [
+              { "$ref": "#/components/schemas/WebhookConfig" },
+              { "$ref": "#/components/schemas/DifyConfig" },
+              { "$ref": "#/components/schemas/CozeConfig" },
+              { "$ref": "#/components/schemas/TimusConfig" }
+            ]
+          },
+          "is_enabled": { "type": "boolean", "default": true, "description": "是否启用，默认 true" },
+          "description": { "type": "string", "nullable": true, "description": "agent 描述（可空字符串或 null）" },
+          "scope": {
+            "allOf": [{ "$ref": "#/components/schemas/AgentScope" }],
+            "nullable": true,
+            "description": "可见范围；不传或 null 时按 public 处理"
+          },
+          "specified_ws_group_ids": {
+            "type": "array",
+            "items": { "type": "integer", "minimum": 1 },
+            "description": "scope=specified_ws_groups 时必填且 minItems=1；scope=public 时可不传或空数组。角色 id 可通过 GET /ws-groups 获取"
+          }
+        }
+      },
+      "UpdateAgentRequest": {
+        "type": "object",
+        "description": "部分更新请求体。仅传需要修改的字段。agent_type 不可修改；如传 config 必须符合原 agent_type 结构。",
+        "properties": {
+          "title": { "type": "string", "maxLength": 100 },
+          "description": { "type": "string", "nullable": true },
+          "is_enabled": { "type": "boolean" },
+          "config": {
+            "type": "object",
+            "description": "新集成配置（按原 agent_type 校验，不可通过 config 改类型）",
+            "oneOf": [
+              { "$ref": "#/components/schemas/WebhookConfig" },
+              { "$ref": "#/components/schemas/DifyConfig" },
+              { "$ref": "#/components/schemas/CozeConfig" },
+              { "$ref": "#/components/schemas/TimusConfig" }
+            ]
+          },
+          "scope": { "$ref": "#/components/schemas/AgentScope" },
+          "specified_ws_group_ids": {
+            "type": "array",
+            "items": { "type": "integer", "minimum": 1 },
+            "description": "scope=specified_ws_groups 时必填且 minItems=1；scope=public 时可不传或空数组"
+          }
+        }
+      },
+      "WebhookConfig": {
+        "type": "object",
+        "required": ["webhook_url"],
+        "properties": {
+          "webhook_url": { "type": "string", "format": "uri", "description": "emoo 调用 agent 的 URL" },
+          "auth_type": { "type": "string", "enum": ["none", "bearer", "custom_headers"], "default": "none", "description": "入站认证类型" },
+          "bearer_token": { "type": "string", "description": "auth_type=bearer 时必填" },
+          "custom_headers": {
+            "type": "array",
+            "description": "auth_type=custom_headers 时必填",
+            "items": {
+              "type": "object",
+              "properties": {
+                "key": { "type": "string" },
+                "value": { "type": "string" }
+              },
+              "required": ["key", "value"]
+            }
+          },
+          "response_mode": { "type": "string", "enum": ["sse", "json"], "default": "json", "description": "响应模式" },
+          "timeout": { "type": "integer", "minimum": 1, "maximum": 600, "default": 300, "description": "超时秒数" },
+          "chat_history_enabled": { "type": "string", "enum": ["on", "off"], "default": "off", "description": "是否推送历史" },
+          "chat_history_count": { "type": "integer", "minimum": 0, "default": 10, "description": "历史消息条数" },
+          "file_delivery_method": { "type": "string", "enum": ["extract_in_emoo", "send_raw_url"], "default": "extract_in_emoo", "description": "附件传递方式：extract_in_emoo=emoo 解析文本 + URL（ref_docs 含 content 和 url）；send_raw_url=仅传文件 URL（payload 中 attachments 字段，agent 自行下载解析）" }
+        }
+      },
+      "DifyConfig": {
+        "type": "object",
+        "required": ["base_url", "api_key", "file_upload_method"],
+        "properties": {
+          "base_url": { "type": "string", "format": "uri", "description": "Dify API 基础地址" },
+          "api_key": { "type": "string", "description": "Dify API Key" },
+          "file_upload_method": { "type": "string", "enum": ["upload_to_dify", "upload_to_emoo"], "description": "文件上传方式" }
+        }
+      },
+      "CozeConfig": {
+        "type": "object",
+        "required": ["base_url", "access_token", "bot_id", "file_extract_method"],
+        "properties": {
+          "base_url": { "type": "string", "format": "uri", "description": "Coze API 基础地址" },
+          "access_token": { "type": "string", "description": "Coze 访问令牌" },
+          "bot_id": { "type": "string", "description": "Coze Bot ID" },
+          "file_extract_method": { "type": "string", "enum": ["extract_in_coze", "extract_in_emoo"], "description": "文件提取方式" }
+        }
+      },
+      "TimusConfig": {
+        "type": "object",
+        "required": ["base_url", "access_token", "agentCode"],
+        "properties": {
+          "base_url": { "type": "string", "format": "uri", "description": "Timus API 基础地址" },
+          "access_token": { "type": "string", "description": "Timus 访问令牌" },
+          "agentCode": { "type": "string", "description": "Timus Agent Code" }
+        }
+      },
+      "AgentResponse": {
+        "type": "object",
+        "properties": {
+          "code": { "type": "integer", "example": 200 },
+          "message": { "type": "string", "example": "success" },
+          "data": { "$ref": "#/components/schemas/Agent" }
+        }
+      },
+      "AgentListResponse": {
+        "type": "object",
+        "properties": {
+          "code": { "type": "integer", "example": 200 },
+          "message": { "type": "string", "example": "success" },
+          "data": {
+            "type": "object",
+            "properties": {
+              "total": { "type": "integer" },
+              "page_size": { "type": "integer" },
+              "current_page": { "type": "integer" },
+              "total_pages": { "type": "integer" },
+              "results": { "type": "array", "items": { "$ref": "#/components/schemas/Agent" } }
+            }
+          }
+        }
+      },
+      "EmptyDataResponse": {
+        "type": "object",
+        "properties": {
+          "code": { "type": "integer", "example": 200 },
+          "message": { "type": "string", "example": "success" },
+          "data": { "type": "object", "nullable": true, "example": null }
+        }
+      },
+      "ErrorResponse": {
+        "type": "object",
+        "description": "业务错误响应（HTTP 状态 200，错误码在 body.code）",
+        "properties": {
+          "code": { "type": "integer" },
+          "message": { "type": "string" },
+          "data": { "type": "object", "nullable": true }
+        }
+      },
+      "UnauthorizedResponse": {
+        "type": "object",
+        "description": "认证失败（4084）",
+        "properties": {
+          "code": { "type": "integer", "example": 4084 },
+          "message": { "type": "string", "example": "invalid_open_api_user_id" },
+          "data": { "type": "object", "nullable": true }
+        }
+      },
+      "ValidationErrorResponse": {
+        "type": "object",
+        "description": "DRF 字段校验失败响应（HTTP 400，body.code=400 validation_error）。触发场景取决于请求 schema 的字段约束。注意：业务级参数错误（如 config 与 agent_type 不匹配）返 4015 invalid_params，见各接口 200 响应描述。",
+        "properties": {
+          "code": { "type": "integer", "example": 400 },
+          "message": { "type": "string", "example": "validation_error" },
+          "data": { "type": "object", "nullable": true }
+        }
+      }
+    }
+  },
+  "paths": {
+    "/agents": {
+      "post": {
+        "tags": ["Agent 管理"],
+        "summary": "创建 agent",
+        "description": "创建 agent。当前支持 4 种集成类型，通过 agent_type 指定，config 字段按类型有不同结构。",
+        "operationId": "createAgent",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/CreateAgentRequest" },
+              "examples": {
+                "webhook": { "value": { "title": "我的 webhook 助手", "agent_type": "webhook", "is_enabled": true, "config": { "webhook_url": "https://my-agent.example.com/webhook", "auth_type": "bearer", "bearer_token": "shared-secret-xxx", "response_mode": "sse", "timeout": 300, "file_delivery_method": "send_raw_url" } } },
+                "dify": { "value": { "title": "我的 dify 助手", "agent_type": "dify", "config": { "base_url": "https://api.dify.ai", "api_key": "sk-xxx", "file_upload_method": "upload_to_dify" } } }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "成功（code=200）或业务错误（HTTP 仍 200）。可能错误码：\n- 4015 invalid_params（config 与 agent_type 不匹配 / scope=specified_ws_groups 时未传 specified_ws_group_ids / specified_ws_group_ids 不属于本 workspace）\n- 4084 invalid_open_api_user_id",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/AgentResponse" },
+                "example": { "code": 200, "message": "success", "data": { "ws_agent_key": "a1b2c3d4e5f6g7h8i9j0k1l2m3n4o5p6", "title": "我的 webhook 助手", "agent_type": "webhook", "is_enabled": true, "description": null, "scope": "public", "specified_ws_group_ids": [], "created_at": "2026-07-04T10:00:00Z", "updated_at": "2026-07-04T10:00:00Z" } }
+              }
+            }
+          },
+          "401": {
+            "description": "认证失败（4084）",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/UnauthorizedResponse" } } }
+          },
+          "400": {
+            "description": "DRF 字段校验失败（HTTP 400，body.code=400 validation_error）。可能场景：title 缺失 / 超过 100 字符、agent_type 缺失 / 非法、config 缺失、is_enabled 传非 boolean。",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ValidationErrorResponse" } } }
+          }
+        }
+      },
+      "get": {
+        "tags": ["Agent 管理"],
+        "summary": "获取 agent 列表",
+        "description": "获取当前 workspace 下的第三方集成 agent 列表（分页）。",
+        "operationId": "listAgents",
+        "parameters": [
+          { "name": "page_size", "in": "query", "required": false, "schema": { "type": "integer", "default": 20, "minimum": 1, "maximum": 200 } },
+          { "name": "current_page", "in": "query", "required": false, "schema": { "type": "integer", "default": 1, "minimum": 1 } },
+          { "name": "agent_type", "in": "query", "required": false, "schema": { "$ref": "#/components/schemas/AgentType" } }
+        ],
+        "responses": {
+          "200": {
+            "description": "成功（code=200）或业务错误。可能错误码：\n- 4084 invalid_open_api_user_id",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/AgentListResponse" }
+              }
+            }
+          },
+          "401": {
+            "description": "认证失败（4084）",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/UnauthorizedResponse" } } }
+          },
+          "400": {
+            "description": "DRF 字段校验失败（HTTP 400，body.code=400 validation_error）。可能场景：page_size 超出 1-200 范围、page_size / current_page 传非整数、agent_type 非法枚举值。",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ValidationErrorResponse" } } }
+          }
+        }
+      }
+    },
+    "/agents/{ws_agent_key}": {
+      "parameters": [
+        { "$ref": "#/components/parameters/WsAgentKey" }
+      ],
+      "get": {
+        "tags": ["Agent 管理"],
+        "summary": "获取 agent 详情",
+        "description": "获取指定 agent 的详情。",
+        "operationId": "retrieveAgent",
+        "responses": {
+          "200": {
+            "description": "成功（code=200）或业务错误。可能错误码：\n- 4081 ws_agent_not_found（ws_agent_key 不存在或当前用户无可见权限）\n- 4084 invalid_open_api_user_id",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/AgentResponse" }
+              }
+            }
+          },
+          "401": {
+            "description": "认证失败（4084）",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/UnauthorizedResponse" } } }
+          }
+        }
+      },
+      "patch": {
+        "tags": ["Agent 管理"],
+        "summary": "部分更新 agent",
+        "description": "部分更新 agent 配置。仅传需要修改的字段。agent_type 不可修改；如传 config，必须符合该 agent 当前的 agent_type 配置结构。",
+        "operationId": "partialUpdateAgent",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/UpdateAgentRequest" },
+              "examples": {
+                "更新标题和启用状态": { "value": { "title": "新名称", "is_enabled": false } },
+                "更新 webhook config": { "value": { "config": { "webhook_url": "https://my-agent.example.com/new-webhook", "auth_type": "none", "response_mode": "json", "file_delivery_method": "extract_in_emoo" } } }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "成功（code=200）或业务错误。可能错误码：\n- 4015 invalid_params（config 与原 agent_type 不匹配 / scope=specified_ws_groups 时未传 specified_ws_group_ids / specified_ws_group_ids 不属于本 workspace）\n- 4081 ws_agent_not_found\n- 4084 invalid_open_api_user_id",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/AgentResponse" }
+              }
+            }
+          },
+          "401": {
+            "description": "认证失败（4084）",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/UnauthorizedResponse" } } }
+          },
+          "400": {
+            "description": "DRF 字段校验失败（HTTP 400，body.code=400 validation_error）。可能场景：title 超过 100 字符、is_enabled 传非 boolean、config 结构不合法。",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ValidationErrorResponse" } } }
+          }
+        }
+      },
+      "delete": {
+        "tags": ["Agent 管理"],
+        "summary": "删除 agent",
+        "description": "删除 agent。",
+        "operationId": "destroyAgent",
+        "responses": {
+          "200": {
+            "description": "成功（code=200）或业务错误。可能错误码：\n- 4081 ws_agent_not_found\n- 4084 invalid_open_api_user_id",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/EmptyDataResponse" },
+                "example": { "code": 200, "message": "success", "data": null }
+              }
+            }
+          },
+          "401": {
+            "description": "认证失败（4084）",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/UnauthorizedResponse" } } }
+          }
+        }
+      }
+    }
+  }
+}

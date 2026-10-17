@@ -1,0 +1,183 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "emoo 应用与文档组 OpenAPI",
+    "version": "1.1.0",
+    "description": "查询工作区下用户可见的应用（ws_app）列表，以及指定应用下的文档组（doc_group）列表。\n\n- 应用可见性按工作区权限设置（与数据源权限一致的应用所有成员可见；仅指定成员的应用只对被授权的成员可见）。\n- 所有数量字段（doc_group_count / doc_count）按用户实际可见范围统计。\n- 用户无任何可见应用时，`GET /apps` 返回空数组 `[]`。",
+    "contact": { "name": "emoo", "url": "https://open.emooai.com" }
+  },
+  "servers": [
+    { "url": "http://localhost:8000/open-api/v1", "description": "本地开发" },
+    { "url": "https://app.emooai.com/open-api/v1", "description": "SaaS 生产" }
+  ],
+  "components": {
+    "securitySchemes": {
+      "BearerAuth": { "type": "http", "scheme": "bearer", "description": "Access Token 或 API Key（emoo_ 开头），格式：Bearer <token>" }
+    },
+    "schemas": {
+      "WsAppInfo": {
+        "type": "object",
+        "description": "应用信息（含用户可见的文档组/文档计数）",
+        "properties": {
+          "id": { "type": "integer", "description": "应用 ID" },
+          "ws_app_key": { "type": "string", "description": "应用唯一标识" },
+          "title": { "type": "string", "description": "应用名称" },
+          "doc_group_count": { "type": "integer", "description": "用户可见的文档组数量" },
+          "doc_count": { "type": "integer", "description": "用户可见的文档数量" }
+        },
+        "required": ["id", "ws_app_key", "title"]
+      },
+      "DocGroupInfo": {
+        "type": "object",
+        "description": "文档组信息（含用户可见的文档计数）",
+        "properties": {
+          "id": { "type": "integer", "description": "文档组 ID" },
+          "app_group_id": { "type": "string", "nullable": true, "description": "数据源中的文档组 ID" },
+          "app_group_name": { "type": "string", "nullable": true, "description": "文档组名称" },
+          "app_group_desc": { "type": "string", "nullable": true, "description": "文档组描述" },
+          "url": { "type": "string", "nullable": true, "description": "文档组链接" },
+          "doc_count": { "type": "integer", "description": "用户可见的文档数量" },
+          "created_at": { "type": "string", "format": "date-time", "nullable": true },
+          "updated_at": { "type": "string", "format": "date-time", "nullable": true }
+        },
+        "required": ["id", "doc_count"]
+      },
+      "AppListResponse": {
+        "type": "object",
+        "properties": {
+          "code": { "type": "integer", "example": 200 },
+          "message": { "type": "string", "example": "success" },
+          "data": {
+            "type": "array",
+            "description": "可见应用列表；用户无可见应用时为空数组 []",
+            "items": { "$ref": "#/components/schemas/WsAppInfo" }
+          }
+        }
+      },
+      "DocGroupListResponse": {
+        "type": "object",
+        "properties": {
+          "code": { "type": "integer", "example": 200 },
+          "message": { "type": "string", "example": "success" },
+          "data": {
+            "type": "object",
+            "properties": {
+              "total": { "type": "integer" },
+              "page_size": { "type": "integer" },
+              "current_page": { "type": "integer" },
+              "total_pages": { "type": "integer" },
+              "results": { "type": "array", "items": { "$ref": "#/components/schemas/DocGroupInfo" } }
+            },
+            "required": ["total", "page_size", "current_page", "total_pages", "results"]
+          }
+        }
+      },
+      "ErrorResponse": {
+        "type": "object",
+        "description": "业务错误响应（HTTP 状态 200，错误码在 body.code）",
+        "properties": {
+          "code": { "type": "integer" },
+          "message": { "type": "string" },
+          "data": { "type": "object", "nullable": true }
+        }
+      },
+      "UnauthorizedResponse": {
+        "type": "object",
+        "description": "认证失败（4084）或 OAuth 客户端无关联用户（HTTP 401）",
+        "properties": {
+          "code": { "type": "integer", "example": 4084 },
+          "message": { "type": "string", "example": "invalid_open_api_user_id" },
+          "data": { "type": "object", "nullable": true }
+        }
+      }
+    }
+  },
+  "security": [{ "BearerAuth": [] }],
+  "tags": [
+    { "name": "应用与文档组", "description": "工作区下应用（ws_app）与文档组（doc_group）查询" }
+  ],
+  "paths": {
+    "/apps": {
+      "get": {
+        "tags": ["应用与文档组"],
+        "summary": "获取应用列表",
+        "description": "返回当前用户在工作区中可见的全部应用，含每个应用可见的文档组数与文档数。\n\n- 用户无任何可见应用时返回空数组 `[]`（不报错）。\n- doc_group_count / doc_count 按用户实际可见范围统计。",
+        "operationId": "listApps",
+        "responses": {
+          "200": {
+            "description": "成功（code=200）。可能错误码：\n- 4084 invalid_open_api_user_id",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/AppListResponse" },
+                "examples": {
+                  "success": {
+                    "value": {
+                      "code": 200, "message": "success",
+                      "data": [
+                        { "id": 1, "ws_app_key": "a1b2c3d4e5f6", "title": "飞书知识库", "doc_group_count": 12, "doc_count": 156 }
+                      ]
+                    }
+                  },
+                  "empty": {
+                    "summary": "无可见应用（data=[]）",
+                    "value": { "code": 200, "message": "success", "data": [] }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "认证失败（4084）或 OAuth 客户端无关联用户",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/UnauthorizedResponse" } } }
+          }
+        }
+      }
+    },
+    "/app/{ws_app_key}/doc-groups": {
+      "get": {
+        "tags": ["应用与文档组"],
+        "summary": "获取应用的文档组列表",
+        "description": "分页返回指定应用下用户可见的所有文档组，含每个文档组中用户可见的文档数量。",
+        "operationId": "listDocGroups",
+        "parameters": [
+          { "name": "ws_app_key", "in": "path", "required": true, "schema": { "type": "string" }, "description": "应用唯一标识" },
+          { "name": "page_size", "in": "query", "required": false, "schema": { "type": "integer", "default": 100, "minimum": 1, "maximum": 200 }, "description": "每页数量，默认 100，最大 200" },
+          { "name": "current_page", "in": "query", "required": false, "schema": { "type": "integer", "default": 1, "minimum": 1 }, "description": "页码，默认 1" }
+        ],
+        "responses": {
+          "200": {
+            "description": "成功（code=200）或业务错误（HTTP 仍 200）。可能错误码：\n- 4008 ws_app_not_found（ws_app_key 不存在）\n- 4042 permission_denied（用户对该应用无可见权限）\n- 4084 invalid_open_api_user_id",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/DocGroupListResponse" },
+                "examples": {
+                  "success": {
+                    "value": {
+                      "code": 200, "message": "success",
+                      "data": {
+                        "total": 6, "page_size": 100, "current_page": 1, "total_pages": 1,
+                        "results": [{
+                          "id": 100, "app_group_id": "g1", "app_group_name": "产品文档", "app_group_desc": "产品相关文档",
+                          "url": "https://example.com/group/g1", "doc_count": 25,
+                          "created_at": "2026-01-01T00:00:00Z", "updated_at": "2026-01-15T00:00:00Z"
+                        }]
+                      }
+                    }
+                  },
+                  "permission_denied": {
+                    "description": "4042 用户对该应用无可见权限",
+                    "value": { "code": 4042, "message": "permission_denied", "data": null }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "认证失败（4084）",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/UnauthorizedResponse" } } }
+          }
+        }
+      }
+    }
+  }
+}

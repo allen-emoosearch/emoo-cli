@@ -1,0 +1,434 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "emoo 表权限管理 OpenAPI",
+    "version": "1.1.0",
+    "description": "管理数据表（base table）的访问控制策略（TablePermissionStrategy）：谁能看、能改哪些行/列、能否增删记录/改 schema。\n\n底层模型是 role+binding+policy，本接口对外暴露表维度的高层抽象，由后端自动翻译。\n\n- 用户标识统一用 `open_id`、用户组用 `ws_group.id`，两者都从[通讯录](openapi_contacts.swagger.json)获取。\n- 跨表保护：更新/删除策略时，后端会校验底层 role 是否只服务于当前表，命中其他表会拒绝（4209）。\n- **description 必填且非空**（serializer `allow_blank=False`）。\n- **data_range=specified 时 conditions 必填非空**。\n- **column_permissions 至少一列非 hidden 或某个 allow_*=true**（空策略兜底）。\n- **标题列不允许配 hidden**（4212 base_table_column_permission_invalid）。\n- 4 个接口都要求 workspace 超管权限（非超管返回 4042）。",
+    "contact": { "name": "emoo", "url": "https://open.emooai.com" }
+  },
+  "servers": [
+    { "url": "http://localhost:8000/open-api/v1", "description": "本地开发" },
+    { "url": "https://app.emooai.com/open-api/v1", "description": "SaaS 生产" }
+  ],
+  "components": {
+    "securitySchemes": {
+      "BearerAuth": { "type": "http", "scheme": "bearer", "description": "Access Token 或 API Key（emoo_ 开头），格式：Bearer <token>" }
+    },
+    "schemas": {
+      "Audience": {
+        "type": "object",
+        "description": "策略受众：所有人 或 指定用户/组",
+        "properties": {
+          "type": { "type": "string", "enum": ["all", "specified"], "description": "all=workspace 所有成员；specified=指定用户/组" },
+          "user_open_ids": {
+            "type": "array",
+            "items": { "type": "string" },
+            "description": "指定成员的 open_id 列表，仅 type=specified 时使用；与 group_ids 至少有一个非空"
+          },
+          "group_ids": {
+            "type": "array",
+            "items": { "type": "integer" },
+            "description": "指定用户组的 ws_group id 列表，仅 type=specified 时使用；与 user_open_ids 至少有一个非空"
+          }
+        },
+        "required": ["type"],
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "type": { "type": "string", "enum": ["all"] }
+            },
+            "required": ["type"]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": { "type": "string", "enum": ["specified"] },
+              "user_open_ids": { "type": "array", "items": { "type": "string" } },
+              "group_ids": { "type": "array", "items": { "type": "integer" } }
+            },
+            "required": ["type"]
+          }
+        ]
+      },
+      "ConditionItem": {
+        "type": "object",
+        "description": "行级过滤条件，与 emoo base 前端权限弹窗的条件构造器一致",
+        "properties": {
+          "field": { "type": "string", "description": "字段 column_key" },
+          "op": { "type": "string", "description": "操作符，取决于字段类型（如 is / is_not / contains / gt / lt 等）" },
+          "value": {
+            "oneOf": [
+              { "type": "string" },
+              { "type": "number" },
+              { "type": "array", "items": { "type": "string" } }
+            ],
+            "description": "条件值，单值或数组（如 in 操作）"
+          }
+        },
+        "required": ["field", "op", "value"]
+      },
+      "PermissionStrategy": {
+        "type": "object",
+        "description": "表权限策略：表维度的高层抽象",
+        "properties": {
+          "role_key": { "type": "string", "description": "策略唯一标识，后端自动生成（格式 strategy_<8位>）" },
+          "description": { "type": "string", "description": "策略描述（必填非空）" },
+          "audience": { "$ref": "#/components/schemas/Audience" },
+          "data_range": {
+            "type": "string",
+            "enum": ["all", "specified"],
+            "description": "all=所有行；specified=按 conditions 过滤"
+          },
+          "conditions": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/ConditionItem" },
+            "description": "行级过滤条件，data_range=specified 时非空"
+          },
+          "column_permissions": {
+            "type": "object",
+            "description": "每列访问级别，key=column_key，value ∈ visible / editable / hidden",
+            "additionalProperties": {
+              "type": "string",
+              "enum": ["visible", "editable", "hidden"]
+            }
+          },
+          "allow_create": { "type": "boolean", "description": "是否允许创建记录" },
+          "allow_delete": { "type": "boolean", "description": "是否允许删除记录" },
+          "allow_schema_update": { "type": "boolean", "description": "是否允许改 schema" },
+          "allow_schema_delete": { "type": "boolean", "description": "是否允许删 schema" }
+        },
+        "required": ["role_key", "description", "audience", "data_range", "column_permissions"]
+      },
+      "PermissionListResponse": {
+        "type": "object",
+        "properties": {
+          "code": { "type": "integer", "example": 200 },
+          "message": { "type": "string", "example": "success" },
+          "data": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/PermissionStrategy" }
+          }
+        }
+      },
+      "PermissionSingleResponse": {
+        "type": "object",
+        "properties": {
+          "code": { "type": "integer", "example": 200 },
+          "message": { "type": "string", "example": "success" },
+          "data": { "$ref": "#/components/schemas/PermissionStrategy" }
+        }
+      },
+      "CreatePermissionRequest": {
+        "type": "object",
+        "description": "创建策略请求体（role_key 后端自动生成）",
+        "properties": {
+          "description": { "type": "string", "minLength": 1, "description": "策略描述（必填非空）" },
+          "audience": { "$ref": "#/components/schemas/Audience" },
+          "data_range": {
+            "type": "string",
+            "enum": ["all", "specified"]
+          },
+          "conditions": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/ConditionItem" }
+          },
+          "column_permissions": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string",
+              "enum": ["visible", "editable", "hidden"]
+            }
+          },
+          "allow_create": { "type": "boolean", "default": false },
+          "allow_delete": { "type": "boolean", "default": false },
+          "allow_schema_update": { "type": "boolean", "default": false },
+          "allow_schema_delete": { "type": "boolean", "default": false }
+        },
+        "required": ["description", "audience", "data_range", "column_permissions"]
+      },
+      "UpdatePermissionRequest": {
+        "allOf": [
+          { "$ref": "#/components/schemas/CreatePermissionRequest" }
+        ],
+        "description": "更新策略请求体（整策略覆盖，未传字段会被置为默认值）"
+      },
+      "DeletePermissionResponse": {
+        "type": "object",
+        "properties": {
+          "code": { "type": "integer", "example": 200 },
+          "message": { "type": "string", "example": "success" },
+          "data": {
+            "type": "object",
+            "properties": {
+              "role_key": { "type": "string" },
+              "deleted": { "type": "boolean", "example": true }
+            }
+          }
+        }
+      },
+      "ErrorResponse": {
+        "type": "object",
+        "description": "业务错误响应（HTTP 状态 200，错误码在 body.code）",
+        "properties": {
+          "code": { "type": "integer", "description": "业务错误码，详见各 endpoint 的 200 响应 description" },
+          "message": { "type": "string" },
+          "data": { "type": "object", "nullable": true }
+        }
+      },
+      "UnauthorizedResponse": {
+        "type": "object",
+        "description": "认证失败（4084）：缺 Emoo-User-Id、用户不存在、OAuth token 失效",
+        "properties": {
+          "code": { "type": "integer", "example": 4084 },
+          "message": { "type": "string", "example": "invalid_open_api_user_id" },
+          "data": { "type": "object", "nullable": true }
+        }
+      },
+      "ValidationErrorResponse": {
+        "type": "object",
+        "description": "DRF 字段校验失败响应（HTTP 400，body.code=400 validation_error）。触发场景取决于请求 schema 的字段约束（required / allow_blank / enum / data_range+conditions 配对等）。",
+        "properties": {
+          "code": { "type": "integer", "example": 400 },
+          "message": { "type": "string", "example": "validation_error" },
+          "data": { "type": "object", "nullable": true }
+        }
+      }
+    }
+  },
+  "security": [{ "BearerAuth": [] }],
+  "tags": [{ "name": "表权限管理", "description": "数据表（base table）的访问控制策略 CRUD" }],
+  "paths": {
+    "/data/table/{table_key}/permissions": {
+      "get": {
+        "tags": ["表权限管理"],
+        "summary": "获取表的所有权限策略",
+        "description": "返回当前表中已配置的全部权限策略。底层是 ws_app 维度的 role，本接口按 resource_key 命中本表的策略过滤后返回。",
+        "operationId": "listPermissionStrategies",
+        "parameters": [
+          { "name": "table_key", "in": "path", "required": true, "schema": { "type": "string" }, "description": "数据表 key" }
+        ],
+        "responses": {
+          "200": {
+            "description": "成功（code=200）或业务错误（HTTP 仍 200，错误码在 body.code）。可能错误码：\n- 4015 invalid_params（参数校验失败）\n- 4042 permission_denied（非 workspace 超管）\n- 4084 invalid_open_api_user_id（缺 Emoo-User-Id 或用户不存在）\n- 4133 base_table_not_found（table_key 不存在）",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/PermissionListResponse" },
+                "examples": {
+                  "success": {
+                    "value": {
+                      "code": 200,
+                      "message": "success",
+                      "data": [
+                        {
+                          "role_key": "strategy_abc12345",
+                          "description": "技术部可编辑",
+                          "audience": { "type": "specified", "user_open_ids": ["ou_abc", "ou_def"], "group_ids": [1] },
+                          "data_range": "all",
+                          "conditions": [],
+                          "column_permissions": { "fld_name": "editable", "fld_age": "visible", "fld_salary": "hidden" },
+                          "allow_create": true,
+                          "allow_delete": false,
+                          "allow_schema_update": false,
+                          "allow_schema_delete": false
+                        }
+                      ]
+                    }
+                  },
+                  "permission_denied": {
+                    "description": "4042 非超管",
+                    "value": { "code": 4042, "message": "permission_denied", "data": null }
+                  },
+                  "table_not_found": {
+                    "description": "4133 表不存在",
+                    "value": { "code": 4133, "message": "base_table_not_found", "data": { "table_key": "tbl_xxx" } }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "认证失败（4084）",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/UnauthorizedResponse" } } }
+          }
+        }
+      },
+      "post": {
+        "tags": ["表权限管理"],
+        "summary": "创建一条权限策略",
+        "description": "为指定表创建一条权限策略，role_key 由后端自动生成。audience 中的 user_open_ids 会被翻译成内部 ws_user_id。",
+        "operationId": "createPermissionStrategy",
+        "parameters": [
+          { "name": "table_key", "in": "path", "required": true, "schema": { "type": "string" }, "description": "数据表 key" }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/CreatePermissionRequest" },
+              "examples": {
+                "all_users_editable": {
+                  "summary": "所有人可编辑（最宽松）",
+                  "value": {
+                    "description": "所有人可编辑",
+                    "audience": { "type": "all" },
+                    "data_range": "all",
+                    "column_permissions": { "fld_name": "editable", "fld_age": "editable" },
+                    "allow_create": true
+                  }
+                },
+                "specified_users_with_row_filter": {
+                  "summary": "指定用户 + 行级过滤",
+                  "value": {
+                    "description": "技术部可编辑自己部门的记录",
+                    "audience": {
+                      "type": "specified",
+                      "user_open_ids": ["ou_abc", "ou_def"],
+                      "group_ids": [1]
+                    },
+                    "data_range": "specified",
+                    "conditions": [
+                      { "field": "fld_dept", "op": "is", "value": "技术部" }
+                    ],
+                    "column_permissions": {
+                      "fld_name": "editable",
+                      "fld_age": "visible",
+                      "fld_salary": "hidden"
+                    },
+                    "allow_create": true,
+                    "allow_delete": false
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "成功（code=200）或业务错误（HTTP 仍 200）。可能错误码：\n- 4015 invalid_params（参数校验失败，如 description 空 / data_range=specified 但 conditions 空 / 全 hidden 空策略 / audience.type 非法）\n- 4042 permission_denied（非超管）\n- 4084 invalid_open_api_user_id\n- 4133 base_table_not_found（table_key 不存在）\n- 4137 base_column_not_found（column_permissions 含未知 column_key）\n- 4210 base_open_id_invalid（audience.user_open_ids 含无效 open_id）\n- 4212 base_title_column_hidden_forbidden（标题列配了 hidden）",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/PermissionSingleResponse" },
+                "examples": {
+                  "success": {
+                    "value": {
+                      "code": 200,
+                      "message": "success",
+                      "data": {
+                        "role_key": "strategy_abc12345",
+                        "description": "技术部可编辑",
+                        "audience": { "type": "specified", "user_open_ids": ["ou_abc", "ou_def"], "group_ids": [1] },
+                        "data_range": "all",
+                        "conditions": [],
+                        "column_permissions": { "fld_name": "editable", "fld_age": "visible", "fld_salary": "hidden" },
+                        "allow_create": true,
+                        "allow_delete": false,
+                        "allow_schema_update": false,
+                        "allow_schema_delete": false
+                      }
+                    }
+                  },
+                  "column_not_found": {
+                    "description": "4137 column_key 不属于本表",
+                    "value": { "code": 4137, "message": "base_column_not_found", "data": { "invalid_column_keys": ["fld_unknown"], "table_key": "tbl_xxx" } }
+                  },
+                  "open_id_invalid": {
+                    "description": "4210 audience open_id 无效",
+                    "value": { "code": 4210, "message": "base_open_id_invalid", "data": { "invalid_open_ids": ["ou_unknown"] } }
+                  },
+                  "title_hidden_forbidden": {
+                    "description": "4212 标题列不允许配 hidden",
+                    "value": { "code": 4212, "message": "base_title_column_hidden_forbidden", "data": { "title_column_keys": ["fld_title"], "table_key": "tbl_xxx" } }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "认证失败（4084）",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/UnauthorizedResponse" } } }
+          },
+          "400": {
+            "description": "DRF 字段校验失败（HTTP 400，body.code=400 validation_error）。可能场景：description 缺失/空串、audience 缺失、data_range 非法、data_range=specified 时 conditions 为空、column_permissions 缺失或空策略、column_permissions 值非 visible/editable/hidden。",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ValidationErrorResponse" } } }
+          }
+        }
+      }
+    },
+    "/data/table/{table_key}/permissions/{role_key}": {
+      "put": {
+        "tags": ["表权限管理"],
+        "summary": "更新权限策略（整策略覆盖）",
+        "description": "整策略覆盖更新。未传的字段会被置为默认值（如 allow_create 不传则变 false）。跨表保护：若该 role 同时命中其他表，拒绝更新（4209）。",
+        "operationId": "updatePermissionStrategy",
+        "parameters": [
+          { "name": "table_key", "in": "path", "required": true, "schema": { "type": "string" }, "description": "数据表 key" },
+          { "name": "role_key", "in": "path", "required": true, "schema": { "type": "string" }, "description": "策略 id（来自 list）" }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/UpdatePermissionRequest" },
+              "example": {
+                "description": "技术部可编辑 v2",
+                "audience": { "type": "all" },
+                "data_range": "all",
+                "column_permissions": { "fld_name": "editable", "fld_age": "editable" },
+                "allow_create": true,
+                "allow_delete": true
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "成功（code=200）或业务错误。可能错误码：\n- 4015 invalid_params（同 create 的参数校验）\n- 4042 permission_denied\n- 4084 invalid_open_api_user_id\n- 4133 base_table_not_found\n- 4137 base_column_not_found\n- 4201 base_role_not_found（role_key 不存在）\n- 4209 base_role_cross_table_conflict（该 role 命中其他表，拒绝更新）\n- 4210 base_open_id_invalid\n- 4212 base_title_column_hidden_forbidden",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/PermissionSingleResponse" }
+              }
+            }
+          },
+          "401": {
+            "description": "认证失败（4084）",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/UnauthorizedResponse" } } }
+          },
+          "400": {
+            "description": "DRF 字段校验失败（HTTP 400，body.code=400 validation_error）。可能场景：description 缺失/空串、audience 缺失、data_range 非法、data_range=specified 时 conditions 为空、column_permissions 缺失或空策略、column_permissions 值非 visible/editable/hidden。",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ValidationErrorResponse" } } }
+          }
+        }
+      },
+      "delete": {
+        "tags": ["表权限管理"],
+        "summary": "删除权限策略",
+        "description": "物理删除该策略（底层 role+binding+policy 全部清除）。跨表保护：若该 role 同时命中其他表，拒绝删除（4209）。",
+        "operationId": "deletePermissionStrategy",
+        "parameters": [
+          { "name": "table_key", "in": "path", "required": true, "schema": { "type": "string" }, "description": "数据表 key" },
+          { "name": "role_key", "in": "path", "required": true, "schema": { "type": "string" }, "description": "策略 id" }
+        ],
+        "responses": {
+          "200": {
+            "description": "删除成功（code=200）或业务错误。可能错误码：\n- 4042 permission_denied\n- 4084 invalid_open_api_user_id\n- 4133 base_table_not_found\n- 4201 base_role_not_found\n- 4209 base_role_cross_table_conflict",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/DeletePermissionResponse" },
+                "example": {
+                  "code": 200,
+                  "message": "success",
+                  "data": { "role_key": "strategy_abc12345", "deleted": true }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "认证失败（4084）",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/UnauthorizedResponse" } } }
+          }
+        }
+      }
+    }
+  }
+}

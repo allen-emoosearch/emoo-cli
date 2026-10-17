@@ -60,6 +60,10 @@ emoo skill pipeline knowledge-map --auto --ttl 24h
 │    → emoo base record-list --table-name "<name>" -f "..."
 │      支持: eq/gte/lte/contains(模糊搜索)
 │
+├─ 是数量/金额/分组统计？
+│    → emoo data aggregate -m count|sum|avg|min|max|values
+│      服务端聚合，不用拉全量；--group-by + --interval 做分组/时间趋势
+│
 └─ 不确定？先检查 KM
      → emoo skill pipeline knowledge-map --auto --ttl 24h
 ```
@@ -84,6 +88,15 @@ emoo data search -k "关键词" --max-results 500
 emoo data search -k "关键词" -f '{"field":"ws_app.ws_app_key","operator":"eq","value":"<key>"}'
 # 过滤字段: ws_app.ws_app_key / doc_group.app_group_id / app_created_at / app_updated_at
 # 运算符: eq, neq, in, nin, gte, lte
+```
+
+### 聚合统计
+```bash
+emoo data aggregate -m count                          # 总文档数
+emoo data aggregate -m sum --field 合同金额           # 金额合计
+emoo data aggregate -m count --group-by 部门          # 按部门分组
+emoo data aggregate -m count --group-by 签约日 --interval month   # 按月趋势
+emoo data aggregate -m values --field 工号            # 字段枚举
 ```
 
 ### Base 表操作
@@ -125,6 +138,11 @@ emoo agent delete <key> -f                          # 删除 Agent
 # dify:    {"base_url":"https://api.dify.ai","api_key":"sk-xxx","file_upload_method":"upload_to_dify"}
 # coze:    {"base_url":"https://api.coze.com","access_token":"xxx","bot_id":"123","file_extract_method":"extract_in_coze"}
 # timus:   {"base_url":"https://...","access_token":"xxx","agentCode":"a-001"}
+
+# 数据源权限 (v0.2.0+): all / include_specified_data / exclude_specified_data
+emoo agent create -n <name> -t webhook -c '<json>' \
+  --data-auth include_specified_data --ws-app-keys <key> --doc-group-ids 1,2
+emoo agent update <key> --data-auth all      # 恢复全部数据
 ```
 
 ### 角色管理
@@ -135,6 +153,13 @@ emoo role update <id> --name <new>          # 更新角色
 emoo role delete <id> -f                    # 删除角色
 emoo role members-add <id> <open_id...>     # 批量添加成员
 emoo role members-remove <id> <open_id>     # 移除成员
+emoo role members-list <id>                 # 成员列表 (分页)
+emoo role batch-get <id...>                 # 批量查角色 (≤100)
+```
+
+### 用户批量查询
+```bash
+emoo contact batch-get <open_id...>         # 批量查用户 (≤100, 缺失静默省略)
 ```
 
 ### 表权限管理
@@ -160,6 +185,33 @@ emoo folder delete -f <id>                     # 删除 (子孙级联)
 emoo file credentials -f '[{"file_name":"a.pdf","file_size":1024}]'   # 取上传凭证+file_key
 emoo file confirm -f '[{"file_key":"...","file_name":"a.pdf","file_size":1024}]'  # 确认→24h下载链接
 emoo file download-url <file_key>              # 刷新下载链接 (24h)
+
+# 知识库文件 (v0.2.0+)
+emoo file register --file-key <k> --file-name a.pdf --file-size 1024 [--folder-id <id>]
+emoo file delete <doc_key> -f
+emoo file permission-get <doc_key>
+emoo file permission-set <doc_key> --visible-type specified --visible-user <open_id> --deletable-type none
+emoo file extract <file_key...> [--output-dir <dir>]   # 解析文本 (≤20)
+```
+
+### 消息推送与工作项 (v0.2.0+)
+```bash
+# 推送并落待办; --thread-key 幂等, --due-at 截止时间
+emoo message push -t normal -c "审批待处理" --from-title "OA" \
+  --thread-key oa:approval-8821 --due-at "2026-09-10T18:00:00+08:00" -u <open_id>
+emoo message batch -f ./messages.json          # 批量 ≤50
+emoo message status <thread_key...> --status resolved|reopened   # 核销/复活 ≤100
+emoo message status-query <thread_key...>      # 对账查询
+
+# 工作项/待办
+emoo todo list [--scope pending|done] [--tag-id <id>]
+emoo todo create -c "跟进合同" --due-at "2026-10-20T18:00:00+08:00"
+emoo todo update <id> --status done
+emoo todo delete <id> -f
+emoo todo tag-list / tag-create / tag-update / tag-delete / tag-reorder
+
+# 个人快捷方式
+emoo shortcut list / create / update / delete / reorder
 ```
 
 > **注意**: Agent/Role/Folder/File 命令需要传 `--user-id <open_id>`，可用 `emoo contact list` 获取。

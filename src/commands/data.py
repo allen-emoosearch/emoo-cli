@@ -260,3 +260,91 @@ def get(ctx, page_size, cursor, text_format, filter_conditions, max_results, str
 
     resp = client.post("/data", body=body)
     output(resp, as_json=ctx.obj.get("as_json", False))
+
+
+@data.command()
+@click.option("--metric", "-m", "metric_type",
+              type=click.Choice(["count", "sum", "avg", "min", "max", "values"]),
+              required=True, help="聚合操作")
+@click.option("--field", "metric_field", default=None,
+              help="聚合字段名 (count 时可省；table 字段可用 '支付信息.*.金额')")
+@click.option("--group-by", "group_by_field", default=None, help="分组字段名")
+@click.option("--interval", "group_by_interval",
+              type=click.Choice(["day", "week", "month", "quarter", "year"]),
+              default=None, help="时间分桶粒度 (仅 date 字段生效)")
+@click.option("--max-groups", type=int, default=None, help="分组桶上限 (hard cap 50)")
+@click.option("--max-values", type=int, default=None, help="values 返回值上限 (hard cap 200)")
+@click.option("--ws-agent-key", default=None, help="Agent 标识，限定聚合范围")
+@click.option("--filter", "-f", "filter_conditions", callback=_parse_filter, default=None,
+              help="过滤条件 (格式同 data search)")
+@click.pass_context
+def aggregate(ctx, metric_type, metric_field, group_by_field, group_by_interval,
+              max_groups, max_values, ws_agent_key, filter_conditions):
+    """聚合统计 — 在可见文档范围内做 metric + group_by 聚合。
+
+    \b
+    示例:
+      emoo data aggregate -m count
+      emoo data aggregate -m sum --field 合同金额
+      emoo data aggregate -m count --group-by 部门
+      emoo data aggregate -m count --group-by 签约日 --interval month
+      emoo data aggregate -m values --field 工号
+    """
+    if metric_type != "count" and not metric_field:
+        raise click.BadParameter(f"metric={metric_type} 需要 --field")
+    if group_by_interval and not group_by_field:
+        raise click.BadParameter("--interval 需要同时指定 --group-by")
+    if max_groups is not None and not (1 <= max_groups <= 50):
+        raise click.BadParameter("--max-groups 需在 1-50 之间")
+    if max_values is not None and not (1 <= max_values <= 200):
+        raise click.BadParameter("--max-values 需在 1-200 之间")
+
+    body: dict = {"metric_type": metric_type}
+    if metric_field:
+        body["metric_field"] = metric_field
+    if group_by_field:
+        body["group_by_field"] = group_by_field
+    if group_by_interval:
+        body["group_by_interval"] = group_by_interval
+    if max_groups is not None:
+        body["max_groups"] = max_groups
+    if max_values is not None:
+        body["max_values"] = max_values
+    if ws_agent_key:
+        body["ws_agent_key"] = ws_agent_key
+    if filter_conditions:
+        body["filter_conditions"] = filter_conditions
+
+    client = EmooClient(base_url=ctx.obj.get("base_url"), user_id=ctx.obj.get("user_id"))
+    resp = client.post("/search/aggregate", body=body)
+
+    if ctx.obj.get("as_json"):
+        output(resp, as_json=True)
+        return
+
+    data_block = resp.get("data", {})
+    _progress(f"total_docs={data_block.get('total_docs', 0)} "
+              f"metric={data_block.get('metric_type')}")
+    if data_block.get("truncated"):
+        _progress("⚠ 已触达分组/枚举上限，结果可能不完整")
+
+    buckets = data_block.get("buckets") or []
+    if not buckets:
+        click.echo(data_block.get("note") or "无数据")
+        return
+
+    from rich.console import Console
+    from rich.table import Table
+    table = Table(title="聚合结果")
+    table.add_column("key")
+    table.add_column("doc_count")
+    table.add_column("metric_value")
+    table.add_column("values")
+    for bucket in buckets:
+        table.add_row(
+            str(bucket.get("key", "")),
+            str(bucket.get("doc_count", "")),
+            str(bucket.get("metric_value", "")),
+            ", ".join(map(str, bucket.get("values") or [])),
+        )
+    Console().print(table)

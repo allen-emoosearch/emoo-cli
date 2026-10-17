@@ -1,0 +1,280 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "emoo Folder 管理 OpenAPI",
+    "version": "1.1.0",
+    "description": "管理 base 内的 folder（文件夹）：创建 / 更新 / 删除 / 列直接 children。\n\n- folder 是 table 与 document 共享的容器，支持树形层级（最深 10 层，超出返 4207）。\n- 写操作（POST/PUT/DELETE）限 workspace 超管（WS_OWNER / WS_ADMIN）；读（GET items）所有成员可调。\n- `GET /data/folder/items` 不传 `folder_id` = 列根级；传 int = 列指定 folder 直接 children。\n- items 接口对 table / document 按用户 Casbin READ 权限过滤（folder 本身不过滤，是公共导航）。\n- 删除 folder 时子孙级联删除，下属 table/document 上浮到祖父（不删除业务数据）。\n- 通过 Bearer token 关联当前 workspace 与 ws_app。",
+    "contact": { "name": "emoo", "url": "https://open.emooai.com" }
+  },
+  "servers": [
+    { "url": "http://localhost:8000/open-api/v1", "description": "本地开发" },
+    { "url": "https://app.emooai.com/open-api/v1", "description": "SaaS 生产" }
+  ],
+  "components": {
+    "securitySchemes": {
+      "BearerAuth": { "type": "http", "scheme": "bearer", "description": "Access Token 或 API Key（emoo_ 开头），格式：Bearer <token>" }
+    },
+    "schemas": {
+      "FolderInfo": {
+        "type": "object",
+        "description": "folder 信息",
+        "properties": {
+          "id": { "type": "integer", "description": "folder ID" },
+          "ws_app_id": { "type": "integer", "description": "所属 ws_app ID" },
+          "workspace_id": { "type": "integer", "nullable": true, "description": "所属 workspace ID" },
+          "name": { "type": "string", "description": "folder 名称" },
+          "parent_id": { "type": "integer", "nullable": true, "description": "父 folder ID，null = 根 folder" },
+          "created_by": { "type": "integer", "nullable": true },
+          "created_at": { "type": "string", "format": "date-time" },
+          "updated_by": { "type": "integer", "nullable": true },
+          "updated_at": { "type": "string", "format": "date-time" },
+          "table_count": { "type": "integer", "nullable": true, "description": "直接子 table + document 总数；OpenAPI 写接口（create/update folder）恒为 null" },
+          "order": { "type": "integer", "description": "同 parent 下排序值" }
+        }
+      },
+      "CreateFolderRequest": {
+        "type": "object",
+        "description": "创建 folder 请求体",
+        "properties": {
+          "name": { "type": "string", "maxLength": 200, "description": "folder 名称（同 parent 下唯一，≤200 字符）" },
+          "parent_id": { "type": "integer", "nullable": true, "minimum": 1, "description": "父 folder ID；不传 / null = 根 folder" }
+        },
+        "required": ["name"]
+      },
+      "UpdateFolderRequest": {
+        "type": "object",
+        "description": "更新 folder 请求体（PATCH 语义：parent_id 不传=不改；null=移到根；int=移动；name 或 parent_id 至少传一项）",
+        "properties": {
+          "folder_id": { "type": "integer", "minimum": 1, "description": "目标 folder ID" },
+          "name": { "type": "string", "maxLength": 200, "description": "新名称" },
+          "parent_id": { "type": "integer", "nullable": true, "minimum": 1, "description": "不传=不改；null=移到根；int=移到目标 parent" }
+        },
+        "required": ["folder_id"]
+      },
+      "DeleteFolderRequest": {
+        "type": "object",
+        "description": "删除 folder 请求体",
+        "properties": {
+          "folder_id": { "type": "integer", "minimum": 1, "description": "目标 folder ID" }
+        },
+        "required": ["folder_id"]
+      },
+      "FolderItem": {
+        "type": "object",
+        "description": "folder 直接 children 列表项（folder/table/document 混合）。DTO 所有字段都会输出，未填充字段为 null。",
+        "properties": {
+          "type": { "type": "string", "enum": ["folder", "table", "document"], "description": "项目类型" },
+          "id": { "type": "integer", "description": "folder/table/document 的 ID" },
+          "name": { "type": "string", "description": "folder.name / table.table_name / document.title" },
+          "parent_id": { "type": "integer", "nullable": true, "description": "folder 专用：父 folder ID" },
+          "folder_id": { "type": "integer", "nullable": true, "description": "table/document 专用：所属 folder ID" },
+          "table_key": { "type": "string", "nullable": true, "description": "table 专用：表标识" },
+          "doc_key": { "type": "string", "nullable": true, "description": "document 专用：文档标识" },
+          "file_key": { "type": "string", "nullable": true, "description": "document 专用：文件标识" },
+          "file_name": { "type": "string", "nullable": true, "description": "document 专用：文件名（从 doc.extra.file_name 取）" },
+          "created_at": { "type": "string", "format": "date-time", "nullable": true },
+          "updated_at": { "type": "string", "format": "date-time", "nullable": true },
+          "folder_order": { "type": "integer", "nullable": true, "description": "table/document 在 folder 内的排序值；OpenAPI items 接口恒为 null" },
+          "record_count": { "type": "integer", "nullable": true, "description": "table 专用：记录数；OpenAPI items 接口恒为 null" },
+          "can_delete": { "type": "boolean", "nullable": true, "description": "当前用户是否有删除权限；OpenAPI items 接口恒为 null" },
+          "has_children": { "type": "boolean", "nullable": true, "description": "folder 专用：是否有可见子节点；table/document 恒为 null" }
+        },
+        "required": ["type", "id", "name"]
+      },
+      "FolderItemListResponse": {
+        "type": "object",
+        "properties": {
+          "code": { "type": "integer", "example": 200 },
+          "message": { "type": "string", "example": "success" },
+          "data": {
+            "type": "object",
+            "properties": {
+              "items": {
+                "type": "array",
+                "items": { "$ref": "#/components/schemas/FolderItem" },
+                "description": "顺序：先 folder（按 order），再 table + document（按 folder_order）"
+              }
+            }
+          }
+        }
+      },
+      "FolderResponse": {
+        "type": "object",
+        "properties": {
+          "code": { "type": "integer", "example": 200 },
+          "message": { "type": "string", "example": "success" },
+          "data": { "$ref": "#/components/schemas/FolderInfo" }
+        }
+      },
+      "DeleteFolderResponse": {
+        "type": "object",
+        "properties": {
+          "code": { "type": "integer", "example": 200 },
+          "message": { "type": "string", "example": "success" },
+          "data": {
+            "type": "object",
+            "properties": { "folder_id": { "type": "integer", "description": "已删除的 folder ID" } }
+          }
+        }
+      },
+      "ErrorResponse": {
+        "type": "object",
+        "description": "业务错误响应（HTTP 状态 200，错误码在 body.code）",
+        "properties": {
+          "code": { "type": "integer", "description": "业务错误码" },
+          "message": { "type": "string" },
+          "data": { "type": "object", "nullable": true }
+        }
+      },
+      "UnauthorizedResponse": {
+        "type": "object",
+        "description": "认证失败（4084）",
+        "properties": {
+          "code": { "type": "integer", "example": 4084 },
+          "message": { "type": "string", "example": "invalid_open_api_user_id" },
+          "data": { "type": "object", "nullable": true }
+        }
+      },
+      "ValidationErrorResponse": {
+        "type": "object",
+        "description": "DRF 字段校验失败响应（HTTP 400，body.code=400 validation_error）。触发场景取决于请求 schema 的字段约束（required / maxLength / minimum 等）。",
+        "properties": {
+          "code": { "type": "integer", "example": 400 },
+          "message": { "type": "string", "example": "validation_error" },
+          "data": { "type": "object", "nullable": true }
+        }
+      }
+    }
+  },
+  "security": [{ "BearerAuth": [] }],
+  "tags": [{ "name": "Folder 管理", "description": "table 与 document 共享的树形 folder 容器" }],
+  "paths": {
+    "/data/folder": {
+      "post": {
+        "summary": "创建 folder",
+        "description": "限 workspace 超管。同 parent 下 folder 名称唯一。",
+        "tags": ["Folder 管理"],
+        "operationId": "createFolder",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/CreateFolderRequest" },
+              "examples": {
+                "root": { "value": { "name": "客户管理" } },
+                "sub": { "value": { "name": "VIP", "parent_id": 12 } }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "成功（code=200）或业务错误（HTTP 仍 200）。可能错误码：\n- 4042 permission_denied（非 workspace 超管）\n- 4084 invalid_open_api_user_id\n- 4199 base_ws_app_not_found\n- 4206 base_folder_name_exists（同 parent 下 folder 名称已存在）\n- 4207 base_folder_depth_exceeded（树深度超 10 层）",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/FolderResponse" } } }
+          },
+          "401": {
+            "description": "认证失败（4084）",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/UnauthorizedResponse" } } }
+          },
+          "400": {
+            "description": "DRF 字段校验失败（HTTP 400，body.code=400 validation_error）。可能场景：name 缺失 / 为空串 / 超过 200 字符、parent_id 传非整数。",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ValidationErrorResponse" } } }
+          }
+        }
+      },
+      "put": {
+        "summary": "更新 folder（改名 / 移动）",
+        "description": "限 workspace 超管。至少提供 name 或 parent_id 中一项。parent_id PATCH 语义：不传=不改；null=移到根；int=移到目标。",
+        "tags": ["Folder 管理"],
+        "operationId": "updateFolder",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/UpdateFolderRequest" },
+              "examples": {
+                "rename": { "value": { "folder_id": 13, "name": "VIP 客户" } },
+                "move": { "value": { "folder_id": 13, "parent_id": 20 } },
+                "to_root": { "value": { "folder_id": 13, "parent_id": null } }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "成功（code=200）或业务错误。可能错误码：\n- 4042 permission_denied\n- 4084 invalid_open_api_user_id\n- 4199 base_ws_app_not_found\n- 4205 base_folder_not_found（folder_id 或 parent_id 不存在）\n- 4206 base_folder_name_exists（同 parent 下重名）\n- 4207 base_folder_depth_exceeded\n- 4208 base_folder_cycle_detected（parent_id 是自身或子孙，造成环）",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/FolderResponse" } } }
+          },
+          "401": {
+            "description": "认证失败（4084）",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/UnauthorizedResponse" } } }
+          },
+          "400": {
+            "description": "DRF 字段校验失败（HTTP 400，body.code=400 validation_error）。可能场景：folder_id 缺失 / 传非整数、name 和 parent_id 都没传、name 超过 200 字符。",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ValidationErrorResponse" } } }
+          }
+        }
+      },
+      "delete": {
+        "summary": "删除 folder",
+        "description": "限 workspace 超管。子孙 folder 级联删除，下属 table/document 上浮到祖父（不删除业务数据）。",
+        "tags": ["Folder 管理"],
+        "operationId": "deleteFolder",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/DeleteFolderRequest" },
+              "examples": { "default": { "value": { "folder_id": 13 } } }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "成功（code=200）或业务错误。可能错误码：\n- 4042 permission_denied\n- 4084 invalid_open_api_user_id\n- 4199 base_ws_app_not_found\n- 4205 base_folder_not_found",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/DeleteFolderResponse" } } }
+          },
+          "401": {
+            "description": "认证失败（4084）",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/UnauthorizedResponse" } } }
+          },
+          "400": {
+            "description": "DRF 字段校验失败（HTTP 400，body.code=400 validation_error）。可能场景：folder_id 缺失 / 传非整数。",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ValidationErrorResponse" } } }
+          }
+        }
+      }
+    },
+    "/data/folder/items": {
+      "get": {
+        "summary": "列出 folder 直接 children",
+        "description": "所有 workspace 成员可调。不传 folder_id = 列根级；传 int = 列指定 folder 直接 children。混合返回 folder + table + document，不递归。",
+        "tags": ["Folder 管理"],
+        "operationId": "listFolderItems",
+        "parameters": [
+          {
+            "name": "folder_id",
+            "in": "query",
+            "required": false,
+            "schema": { "type": "integer", "minimum": 1, "nullable": true },
+            "description": "不传 / null = 列根级；int = 列指定 folder 直接 children"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "成功（code=200）或业务错误。可能错误码：\n- 4084 invalid_open_api_user_id\n- 4199 base_ws_app_not_found",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/FolderItemListResponse" } } }
+          },
+          "401": {
+            "description": "认证失败（4084）",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/UnauthorizedResponse" } } }
+          },
+          "400": {
+            "description": "DRF 字段校验失败（HTTP 400，body.code=400 validation_error）。可能场景：folder_id 传非整数或负数。",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ValidationErrorResponse" } } }
+          }
+        }
+      }
+    }
+  }
+}

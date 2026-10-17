@@ -6,7 +6,8 @@ from importlib.metadata import version as _pkg_version
 
 import click
 
-from .commands import auth, contact, data, chat, message, base, app, skill, agent, role, folder, file
+from .commands import (auth, contact, data, chat, message, base, app, skill,
+                       agent, role, folder, file, work_item, shortcut)
 from .commands.api import api
 from .commands.schema_cmd import schema
 from .errors import EmooError, set_json_mode
@@ -19,10 +20,14 @@ EPILOG = """\b
   emoo schema data.search               查看端点参数/响应/权限
   emoo skill init                       初始化 + 注册到 Claude Code
   emoo data search -k "关键词"           搜索数据
+  emoo data aggregate -m count           聚合统计
   emoo chat send -q "你好"              发送对话
+  emoo message push -t normal -c "通知" -u <open_id>   推送消息/落待办
+  emoo todo list                         查看工作项/待办
   emoo agent list                       Agent 管理 (创建/更新/删除)
   emoo role list                        角色管理 (创建/更新/成员)
   emoo base permission list             表权限策略管理
+  emoo shortcut list                    个人快捷方式
 
 更多帮助: emoo <command> --help
 """
@@ -30,7 +35,7 @@ EPILOG = """\b
 
 _V = _pkg_version("emoo-cli")
 
-@click.group(epilog=EPILOG, help=f"EMOO 开放平台命令行工具 v{_V} — 鉴权、通讯录、数据搜索、对话、消息推送、Base 数据表操作、应用概览.")
+@click.group(epilog=EPILOG, help=f"EMOO 开放平台命令行工具 v{_V} — 鉴权、通讯录、数据搜索/聚合、对话、消息推送、工作项、Base 数据表、Agent/角色/权限、文件管理.")
 @click.version_option(version=_V, prog_name="emoo-cli", message="%(prog)s v%(version)s")
 @click.option("--json", "as_json", is_flag=True, help="输出原始 JSON 格式")
 @click.option("--user-id", envvar="EMOO_USER_ID",
@@ -83,5 +88,7 @@ cli.add_command(agent.agent_group)
 cli.add_command(role.role_group)
 cli.add_command(folder.folder_group)
 cli.add_command(file.file_group)
+cli.add_command(work_item.todo_group)
+cli.add_command(shortcut.shortcut_group)
 cli.add_command(api)
 cli.add_command(schema)

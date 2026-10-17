@@ -1,6 +1,8 @@
 # emoo-cli
 
-EMOO 开放平台命令行工具，覆盖鉴权、通讯录、数据搜索、对话、消息推送、EMOO Base 等全部 OpenAPI 接口。
+EMOO 开放平台命令行工具，覆盖鉴权、通讯录、数据搜索/聚合、对话、消息推送、工作项/待办、个人快捷方式、EMOO Base、Agent/角色/权限、知识库文件等全部 OpenAPI 接口。
+
+> **v0.2.0 (2026-10-17)**：同步远端 73 个 API 操作。新增 `todo`（工作项）、`shortcut`（快捷方式）、`data aggregate`（聚合统计）、`message batch/status/status-query`（推送回调闭环）、`file register/permission/extract`（知识库文件）、`chat agent-send`、`contact/role batch-get`、`role members-list`，以及 Agent `data_auth` 数据源权限。`src/commands/endpoints.json` 改由 `scripts/sync_api_docs.py` 自动生成。
 
 ## 安装
 
@@ -51,7 +53,7 @@ L1 快捷:  emoo skill run <name> / pipeline           智能默认值、MD 驱�
 | 层 | 谁写 | 覆盖 | 价值 |
 |---|:---:|:---:|------|
 | L3 `api` | 自动生成 | 100% API | 无需等待封装，第一天即可用 |
-| L2 域命令 | 手写 | 16 端点 | 结构化、参数校验、Rich 表格 |
+| L2 域命令 | 手写 | 73 端点 | 结构化、参数校验、Rich 表格 |
 | L1 skill | 用户 + 手写 | 高频场景 | 智能默认值、CSV 导出、Claude Code 集成 |
 
 ### Agent 原生契约
@@ -250,6 +252,16 @@ emoo --user-id <id> contact update open_xxx --username "新名称"
 emoo --user-id <id> contact update open_xxx --ext-info '{"key":"value"}'
 ```
 
+#### `emoo contact batch-get`
+
+批量按 `open_id` 查询用户（1-100 个，按请求顺序返回；查不到的用户静默省略）。
+
+```bash
+emoo --user-id <id> contact batch-get open_aaa open_bbb
+emoo --user-id <id> contact batch-get -f ./open_ids.txt
+emoo --user-id <id> --json contact batch-get open_aaa
+```
+
 ---
 
 ### data — 数据搜索与获取
@@ -380,6 +392,28 @@ emoo --user-id <id> data get --stream \
 > **注意**: `--stream` 不加 `--max-results` 时会一直拉取直到数据源返回 `has_more=false`，
 > 可能耗时较长。建议先用 `--max-results` 试探数据量，或配合日期过滤缩小范围。
 
+#### `emoo data aggregate`
+
+在可见文档范围内做服务端聚合，避免拉全量数据到本地计算。
+
+| 参数 | 必填 | 说明 |
+|------|:----:|------|
+| `-m, --metric` | 是 | `count` / `sum` / `avg` / `min` / `max` / `values` |
+| `--field` | 条件 | 聚合字段（count 可省；table 字段可用 `明细.*.金额`） |
+| `--group-by` | 否 | 分组字段 |
+| `--interval` | 否 | 时间分桶：`day/week/month/quarter/year` |
+| `--max-groups` | 否 | 分组桶上限（hard cap 50） |
+| `--max-values` | 否 | values 返回值上限（hard cap 200） |
+| `-f, --filter` | 否 | 过滤条件（格式同 `data search`） |
+
+```bash
+emoo --user-id <id> data aggregate -m count
+emoo --user-id <id> data aggregate -m sum --field 合同金额
+emoo --user-id <id> data aggregate -m count --group-by 部门
+emoo --user-id <id> data aggregate -m count --group-by 签约日 --interval month
+emoo --user-id <id> data aggregate -m values --field 工号
+```
+
 ---
 
 ### chat — 对话管理
@@ -440,42 +474,130 @@ emoo --user-id <id> chat send -q "总结这些文档" --chat-id 5172 --file-list
 
 返回字段：`chat_id`、`message_id`、`complete_response`（AI 回复，可能含 `[xxx]` 引用标记可按需正则去除）。
 
+#### `emoo chat agent-send`
+
+Agent 身份向自己归属的会话追加 assistant 消息（服务间调用，不加 `--user-id` 也可用）。
+
+```bash
+emoo chat agent-send --chat-id 12345 -c "采购单 PO-2026-0912 已创建"
+emoo chat agent-send --chat-id 12345 -c "长任务进度：60%" --dry-run
+```
+
 ---
 
-### message — 消息推送
+### message — 消息推送与回调
+
+每次推送会在目标用户的待办列表落地一条工作项。带 `--thread-key` 时，同一 `(workspace, user, thread_key)` 只保留一条；重推会刷新内容并浮回待处理（重推即复活）。
 
 #### `emoo message push`
 
-主动推送消息给指定用户。
-
 | 参数 | 必填 | 说明 |
 |------|:----:|------|
-| `-t, --type` | 是 | `normal`（普通通知）或 `agent`（Agent 主动推送） |
-| `-c, --content` | 是 | 消息内容（最长 300 字符） |
-| `-u, --user-id` | 否 | 接收者 Emoo User ID |
+| `-t, --type` | 是 | `normal`（普通通知）或 `agent`（Agent 消息） |
+| `-c, --content` | 是 | 消息内容（工作项存前 500 字；agent 原文写入对话） |
+| `-u, --user-id` | 否 | 接收者 open_id |
+| `--thread-key` | 否 | 业务单据 id（≤128 字符，幂等/复活） |
+| `--due-at` | 否 | 截止时间（ISO 8601，建议带时区偏移） |
 | `--from-title` | 条件 | **(normal 必填)** 来源名称 |
 | `--from-image-url` | 否 | 来源头像 URL |
 | `--detail-link` | 否 | 详情链接 |
 | `--agent-key` | 条件 | **(agent 必填)** Agent 的 ws_agent_key |
-| `--chat-id` | 否 | 目标对话 ID（不传则自动创建） |
+| `--chat-id` | 否 | (agent) 目标对话 ID（不传则自动创建） |
 
 ```bash
-# 普通通知消息
-emoo --user-id <id> message push -t normal -c "审批已通过" --from-title "OA系统"
+# 普通通知（落一条待办）
+emoo message push -t normal -c "审批已通过" --from-title "OA系统" -u open_xxx
 
-# 完整普通消息
-emoo --user-id <id> message push -t normal -c "审批已通过" \
-  --from-title "OA系统" \
-  --from-image-url "https://example.com/logo.png" \
-  --detail-link "https://example.com/detail/123"
+# 带业务单据 id + 截止时间（可重推、可核销）
+emoo message push -t normal -c "审批待处理" --from-title "OA系统" \
+  --thread-key oa:approval-8821 --due-at "2026-09-10T18:00:00+08:00" -u open_xxx
 
-# Agent 主动推送
-emoo --user-id <id> message push -t agent -c "您好，这是本周工作总结" \
-  --agent-key <ws_agent_key> \
-  --chat-id 12345
+# Agent 消息
+emoo message push -t agent -c "任务已完成" --agent-key <ws_agent_key> -u open_xxx
 ```
 
-返回字段：`message_id`、`chat_id`（agent 类型一定返回）、`chat_message_id`（agent 类型一定返回）。
+返回字段：`data.item_id`（工作项 id）、`chat_id`、`chat_message_id`（normal 类型后两者为 null）。
+
+#### `emoo message batch`
+
+批量推送（≤50 条，逐条返回结果，不整体原子）。
+
+```bash
+emoo message batch -f ./messages.json
+cat messages.json | emoo message batch -f -
+```
+
+`messages.json` 为数组，或含 `messages` 字段的对象；每条与 `message push` 的请求体同构。
+
+#### `emoo message status`
+
+按 `thread_key` 批量核销/复活工作项（≤100，幂等）。
+
+```bash
+emoo message status oa:approval-8821 --status resolved   # 核销 → done
+emoo message status oa:approval-8821 --status reopened   # 复活 → pending
+emoo message status -f ./thread_keys.txt --status resolved
+```
+
+#### `emoo message status-query`
+
+按 `thread_key` 对账查询各收件人的工作项状态（≤100，可用于重试前查重）。
+
+```bash
+emoo message status-query oa:approval-8821
+emoo --json message status-query oa:approval-8821
+```
+
+---
+
+### todo — 工作项/待办
+
+管理当前用户的统一工作项（自建 + 外部推送 + Agent 消息落地项）与 Tag。
+
+#### `emoo todo list`
+
+```bash
+emoo todo list                          # 待处理（默认）
+emoo todo list --scope done             # 已完成
+emoo todo list --tag-id 3               # 按 Tag 过滤
+emoo todo list --not-taged              # 仅无 Tag
+```
+
+#### `emoo todo create / update / delete`
+
+```bash
+emoo todo create -c "跟进合同审批" --due-at "2026-10-20T18:00:00+08:00" --tag-id 3
+emoo todo update 123 --status done
+emoo todo update 123 --due-at "2026-10-25T18:00:00+08:00" --tag-id 0  # tag_id=0 清空 Tag
+emoo todo update 123 --clear-due-at                                    # 清空截止时间
+emoo todo delete 123 -f
+```
+
+`update` 语义：不传的字段不修改；`--clear-due-at` / `--clear-remind-at` 传 null 清空；`--tag-id 0` 清空 Tag。内容层（content/due_at）仅自建项可改，推送项只能改状态/Tag/提醒。
+
+#### `emoo todo tag-*`
+
+```bash
+emoo todo tag-list
+emoo todo tag-create -n "紧急" --color "#FF0000"
+emoo todo tag-update 3 -n "非常紧急" --color "#CC0000"   # name + color 都必填
+emoo todo tag-reorder 3 1 2                              # 必须传全部 tag_id
+emoo todo tag-delete 3 -f
+```
+
+---
+
+### shortcut — 个人快捷方式
+
+每个用户最多 10 个快捷方式。
+
+```bash
+emoo shortcut list
+emoo shortcut create -t "审批中心" -u "https://oa.example.com"
+emoo shortcut update 1 -t "新标题" -u "https://example.com"
+emoo shortcut reorder 2 1 3        # 必须传全部 shortcut_id
+emoo shortcut delete 1 -f
+```
 
 ---
 
@@ -1171,15 +1293,38 @@ emoo skill pipeline search -p plan.json    执行搜索方案，聚合多 app �
 
 emoo contact list                          获取通讯录成员 (分页+关键词)
 emoo contact update <open_id>              更新成员信息 (用户名/扩展信息)
+emoo contact batch-get <open_id...>        批量按 open_id 查用户 (≤100)
 
 emoo data search -k <keyword>              搜索数据 (分页+过滤+markdown+自动翻页)
 emoo data get [--max-results N] [--stream] 游标分页获取数据 (无 500 上限 + 流式输出)
+emoo data aggregate -m count [--group-by]  聚合统计 (count/sum/avg/min/max/values)
 
 emoo chat list                             对话列表
 emoo chat create [--title <title>]         创建新对话
 emoo chat send -q <query>                  发送消息并获取 AI 回复
+emoo chat agent-send --chat-id <id> -c ... Agent 主动推送会话消息
 
-emoo message push -t normal|agent -c ...   主动推送消息
+emoo message push -t normal|agent -c ...   推送消息并落待办
+emoo message push ... --thread-key <key>   幂等推送 (同单据只保留一条, 重推复活)
+emoo message batch -f <json>               批量推送 (≤50)
+emoo message status <key...> --status ...  批量核销/复活 (resolved|reopened)
+emoo message status-query <key...>         对账查询各收件人状态
+
+emoo todo list [--scope pending|done]      工作项列表 (Tag/状态过滤)
+emoo todo create -c <content>              创建自建工作项
+emoo todo update <id>                      更新工作项 (状态/截止/Tag/提醒)
+emoo todo delete <id>                      删除工作项 (仅自建项)
+emoo todo tag-list                         工作项 Tag 列表
+emoo todo tag-create -n <name> --color ... 创建 Tag
+emoo todo tag-update <id>                  更新 Tag
+emoo todo tag-delete <id>                  删除 Tag
+emoo todo tag-reorder <id...>              重排 Tag
+
+emoo shortcut list                         个人快捷方式列表
+emoo shortcut create -t <title> -u <url>   创建快捷方式
+emoo shortcut update <id>                  更新快捷方式
+emoo shortcut delete <id>                  删除快捷方式
+emoo shortcut reorder <id...>              重排快捷方式
 
 emoo base record-create                    新建记录
 emoo base record-update                    更新单条记录
@@ -1198,6 +1343,7 @@ emoo base permission list                  表权限策略管理
 
 emoo agent list                            Agent 列表
 emoo agent create -n <name> -t <type>     创建 Agent
+emoo agent create ... --data-auth include_specified_data --ws-app-keys ...  限定数据源
 emoo agent get <key>                      Agent 详情
 emoo agent update <key>                   更新 Agent
 emoo agent delete <key>                   删除 Agent
@@ -1208,6 +1354,8 @@ emoo role update <id>                     更新角色
 emoo role delete <id>                     删除角色
 emoo role members-add <id> <open_id...>   批量添加成员
 emoo role members-remove <id> <open_id>   移除成员
+emoo role members-list <id>               角色成员列表
+emoo role batch-get <id...>               批量按 id 查角色 (≤100)
 
 emoo folder list [--folder-id <id>]       列出 folder 内容 (混合 folder/table/doc)
 emoo folder create -n <name>              创建 folder (限超管)
@@ -1217,6 +1365,11 @@ emoo folder delete -f <id>                删除 folder (子孙级联)
 emoo file credentials -f '<files-json>'   获取上传凭证 + file_key
 emoo file confirm -f '<files-json>'       确认上传完成 → 24h 下载链接
 emoo file download-url <file_key>         获取下载链接 (24h)
+emoo file register --file-key <key> ...   登记已上传文件为知识库文件
+emoo file delete <doc_key>                删除知识库文件 (软删除)
+emoo file permission-get <doc_key>        读取文件权限
+emoo file permission-set <doc_key> ...    设置文件权限
+emoo file extract <file_key...>           解析文件内容为文本 (≤20)
 ```
 
 ### Agent 管理 (v0.1.7+)
@@ -1339,6 +1492,36 @@ emoo file download-url <file_key>
 ```
 
 > upload 指令的 `method=POST` 时，需按 `form_fields` 构造 multipart 表单，文件字段名见 `file_field`（默认 `file`）。
+
+#### 知识库文件登记与权限
+
+```bash
+# 把已上传的文件登记为知识库文件（可归属 folder）
+emoo file register --file-key <file_key> --file-name report.pdf --file-size 102400 \
+  --folder-id 12 --title "季度报告"
+
+# 删除知识库文件（软删除）
+emoo file delete <doc_key> -f
+
+# 读取 / 设置文件权限（整体覆盖）
+emoo file permission-get <doc_key>
+emoo file permission-set <doc_key> \
+  --visible-type specified --visible-user open_aaa --visible-group 3 \
+  --deletable-type none
+```
+
+`--visible-type` / `--deletable-type` 取 `all` / `none` / `specified`；`specified` 时至少传一个 `--visible-user`/`--visible-group`（或 deletable 对应参数）。
+
+#### 文件内容解析
+
+```bash
+# 批量解析为纯文本（≤20 个；pdf/docx/pptx/xlsx/csv/txt/md/html/json/xml）
+emoo file extract <file_key1> <file_key2>
+emoo file extract -f ./file_keys.txt --output-dir ./extracted
+emoo --json file extract <file_key>
+```
+
+不走 OCR：图片与纯扫描 PDF 返回空内容；>50MB 文件跳过解析。
 
 ---
 

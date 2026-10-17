@@ -1,0 +1,420 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "emoo 表记录 OpenAPI",
+    "version": "1.1.0",
+    "description": "对知识库表的记录读写：插入 / 更新 / 删除 / 查询。\n\n定位：仅针对 ws_app_type=DATABASE 的应用下的表。\n\n字段类型多态（响应 `fields` 内）：\n- 标量（string/number/boolean/date/time/datetime）：直接返回 value\n- SELECT：返回 label string（单值）或 string[]（多值）\n- USER：`{id: open_id, name}`（单值）或数组（多值）\n- GROUP：`{id: ws_group_id, name}`（单值）或数组（多值）\n- REFERENCE：`{id: record_key, title}`（单值）或数组（多值）\n- FILE：`{file_key, name, size, url}`（单值）或数组（多值）\n\n单值字段（column multiple=False）不加数组包装；多值字段返回数组。\n\n入参 fields 的 key 既支持 column_key 也支持 column_name（后端自动翻译）。USER 字段的入参 value 传 open_id（后端翻译为 ws_user_id）。\n\n记录元数据 created_by/updated_by 结构为 `{id: open_id_string, name}`，**id 字段值是 open_id 字符串，不是 integer**。",
+    "contact": { "name": "emoo", "url": "https://open.emooai.com" }
+  },
+  "servers": [
+    { "url": "http://localhost:8000/open-api/v1", "description": "本地开发" },
+    { "url": "https://app.emooai.com/open-api/v1", "description": "SaaS 生产" }
+  ],
+  "components": {
+    "securitySchemes": {
+      "BearerAuth": { "type": "http", "scheme": "bearer", "description": "Access Token 或 API Key（emoo_ 开头），格式：Bearer <token>" }
+    },
+    "schemas": {
+      "RecordFields": {
+        "type": "object",
+        "description": "记录字段值字典，key 为 column_key 或 column_name，value 按字段类型多态（见 info.description）",
+        "additionalProperties": true
+      },
+      "UserBrief": {
+        "type": "object",
+        "description": "记录系统字段 created_by/updated_by 的用户元数据：id 是 open_id 字符串（非 integer），name 按 ws_username > display_name > username 回退",
+        "properties": {
+          "id": { "type": "string", "description": "用户 open_id" },
+          "name": { "type": "string", "nullable": true }
+        }
+      },
+      "RecordInfo": {
+        "type": "object",
+        "description": "记录信息（响应）",
+        "properties": {
+          "id": { "type": "integer", "description": "记录内部 ID" },
+          "record_key": { "type": "string", "description": "记录唯一标识" },
+          "fields": { "$ref": "#/components/schemas/RecordFields" },
+          "created_by": { "$ref": "#/components/schemas/UserBrief", "description": "创建者" },
+          "created_at": { "type": "string", "format": "date-time", "nullable": true },
+          "updated_by": { "$ref": "#/components/schemas/UserBrief", "description": "更新者" },
+          "updated_at": { "type": "string", "format": "date-time", "nullable": true }
+        },
+        "required": ["id", "record_key", "fields"]
+      },
+      "InsertRecordsRequest": {
+        "type": "object",
+        "description": "插入记录请求体",
+        "properties": {
+          "table_key": { "type": "string", "description": "数据表 key（与 table_name 二选一）" },
+          "table_name": { "type": "string", "description": "数据表名（与 table_key 二选一）" },
+          "records": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 100,
+            "items": { "$ref": "#/components/schemas/RecordFields" }
+          }
+        },
+        "required": ["records"]
+      },
+      "UpdateRecordRequest": {
+        "type": "object",
+        "description": "更新单条记录请求体（record_key 与 record_title 二选一）",
+        "properties": {
+          "table_key": { "type": "string" },
+          "table_name": { "type": "string" },
+          "record_key": { "type": "string", "description": "记录唯一标识（与 record_title 二选一）" },
+          "record_title": { "type": "string", "description": "标题字段值，后端通过 title 列解析为 record_key" },
+          "fields": { "$ref": "#/components/schemas/RecordFields" }
+        },
+        "required": ["fields"]
+      },
+      "BatchUpdateItem": {
+        "type": "object",
+        "description": "批量更新单条",
+        "properties": {
+          "record_key": { "type": "string" },
+          "record_title": { "type": "string" },
+          "fields": { "$ref": "#/components/schemas/RecordFields" }
+        },
+        "required": ["fields"]
+      },
+      "BatchUpdateRecordsRequest": {
+        "type": "object",
+        "description": "批量更新记录请求体",
+        "properties": {
+          "table_key": { "type": "string" },
+          "table_name": { "type": "string" },
+          "records": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 100,
+            "items": { "$ref": "#/components/schemas/BatchUpdateItem" }
+          }
+        },
+        "required": ["records"]
+      },
+      "DeleteRecordsRequest": {
+        "type": "object",
+        "description": "删除记录请求体（record_keys 与 record_titles 二选一）",
+        "properties": {
+          "table_key": { "type": "string" },
+          "table_name": { "type": "string" },
+          "record_keys": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 100,
+            "items": { "type": "string" }
+          },
+          "record_titles": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 100,
+            "items": { "type": "string" }
+          }
+        }
+      },
+      "ListRecordsRequest": {
+        "type": "object",
+        "description": "查询记录请求体",
+        "properties": {
+          "table_key": { "type": "string" },
+          "table_name": { "type": "string" },
+          "page_size": { "type": "integer", "minimum": 1, "maximum": 100 },
+          "current_page": { "type": "integer", "minimum": 1 },
+          "filters": {
+            "type": "array",
+            "items": { "type": "string" },
+            "description": "过滤条件，每条格式 `field:op:value`。op ∈ {eq, neq, in, not_in, gte, lte, is_empty, is_not_empty}。in/not_in 的 value 用逗号分隔多值。field 支持 column_key/column_name/系统字段（id/record_key/created_by/updated_by/created_at/updated_at）。USER 字段的 value 传 open_id，后端自动翻译为 ws_user_id。"
+          },
+          "sort": {
+            "type": "string",
+            "description": "排序，格式 `field:asc` 或 `field:desc`，field 支持 column_key/column_name/系统字段"
+          }
+        }
+      },
+      "InsertRecordsResponse": {
+        "type": "object",
+        "properties": {
+          "code": { "type": "integer", "example": 200 },
+          "message": { "type": "string", "example": "success" },
+          "data": { "type": "array", "items": { "$ref": "#/components/schemas/RecordInfo" } }
+        }
+      },
+      "UpdateRecordResponse": {
+        "type": "object",
+        "properties": {
+          "code": { "type": "integer", "example": 200 },
+          "message": { "type": "string", "example": "success" },
+          "data": { "$ref": "#/components/schemas/RecordInfo" }
+        }
+      },
+      "DeleteRecordsResponse": {
+        "type": "object",
+        "properties": {
+          "code": { "type": "integer", "example": 200 },
+          "message": { "type": "string", "example": "success" },
+          "data": {
+            "type": "object",
+            "properties": { "deleted_count": { "type": "integer" } },
+            "required": ["deleted_count"]
+          }
+        }
+      },
+      "ListRecordsResponse": {
+        "type": "object",
+        "properties": {
+          "code": { "type": "integer", "example": 200 },
+          "message": { "type": "string", "example": "success" },
+          "data": {
+            "type": "object",
+            "properties": {
+              "total": { "type": "integer" },
+              "page_size": { "type": "integer" },
+              "current_page": { "type": "integer" },
+              "total_pages": { "type": "integer" },
+              "results": { "type": "array", "items": { "$ref": "#/components/schemas/RecordInfo" } }
+            },
+            "required": ["total", "page_size", "current_page", "total_pages", "results"]
+          }
+        }
+      },
+      "ErrorResponse": {
+        "type": "object",
+        "description": "业务错误响应（HTTP 状态 200，错误码在 body.code）",
+        "properties": {
+          "code": { "type": "integer", "description": "业务错误码，详见各 endpoint 的 200 响应 description" },
+          "message": { "type": "string" },
+          "data": { "type": "object", "nullable": true }
+        }
+      },
+      "UnauthorizedResponse": {
+        "type": "object",
+        "description": "认证失败（4084）",
+        "properties": {
+          "code": { "type": "integer", "example": 4084 },
+          "message": { "type": "string", "example": "invalid_open_api_user_id" },
+          "data": { "type": "object", "nullable": true }
+        }
+      },
+      "ValidationErrorResponse": {
+        "type": "object",
+        "description": "DRF 字段校验失败响应（HTTP 400，body.code=400 validation_error）。触发场景取决于请求 schema 的字段约束。",
+        "properties": {
+          "code": { "type": "integer", "example": 400 },
+          "message": { "type": "string", "example": "validation_error" },
+          "data": { "type": "object", "nullable": true }
+        }
+      }
+    }
+  },
+  "security": [{ "BearerAuth": [] }],
+  "tags": [
+    { "name": "表记录", "description": "数据表记录的插入 / 更新 / 删除 / 查询" }
+  ],
+  "paths": {
+    "/data/records": {
+      "post": {
+        "tags": ["表记录"],
+        "summary": "插入记录",
+        "description": "向数据表插入 1-100 条记录。\n\n- fields 的 key 既支持 column_key 也支持 column_name。\n- USER 字段入参 value 传 open_id，后端自动翻译为 ws_user_id。\n- 返回插入后的完整记录（含 projection 翻译后的字段）。",
+        "operationId": "insertRecords",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/InsertRecordsRequest" },
+              "example": {
+                "table_key": "tbl_xxx",
+                "records": [ { "name": "张三", "age": 28 } ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "成功（code=200）或业务错误（HTTP 仍 200）。可能错误码：\n- 4084 invalid_open_api_user_id\n- 4133 base_table_not_found\n- 4142 base_record_field_invalid（fields 含未知 column）\n- 4199 base_ws_app_not_found\n- 4200 base_record_select_value_invalid（SELECT 字段值不在 options）\n- 4210 base_open_id_invalid（USER 字段 open_id 无效）\n- 4213 base_record_key_invalid（REFERENCE 字段 record_key 不存在）",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/InsertRecordsResponse" },
+                "examples": {
+                  "success": {
+                    "value": {
+                      "code": 200, "message": "success",
+                      "data": [{
+                        "id": 1, "record_key": "rec_abc",
+                        "fields": { "name": "张三", "age": 28 },
+                        "created_by": { "id": "ou_xxx", "name": "操作人" },
+                        "created_at": "2026-01-01T00:00:00Z",
+                        "updated_by": null, "updated_at": null
+                      }]
+                    }
+                  },
+                  "field_invalid": {
+                    "description": "4142 字段不存在",
+                    "value": { "code": 4142, "message": "base_record_field_invalid", "data": { "field": "unknown_col" } }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "认证失败（4084）",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/UnauthorizedResponse" } } }
+          },
+          "400": {
+            "description": "DRF 字段校验失败（HTTP 400，body.code=400 validation_error）。可能场景：records 缺失 / 为空数组 / 超 100 条、table_key+table_name 都没传。",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ValidationErrorResponse" } } }
+          }
+        }
+      },
+      "put": {
+        "tags": ["表记录"],
+        "summary": "更新单条记录",
+        "description": "按 record_key 或 record_title 更新一条记录的字段。\n\n- record_key 与 record_title 二选一；传 record_title 时后端通过 title 列解析 record_key。\n- USER 字段入参 value 传 open_id。",
+        "operationId": "updateRecord",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/UpdateRecordRequest" },
+              "example": { "table_key": "tbl_xxx", "record_key": "rec_abc", "fields": { "age": 29 } }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "成功（code=200）或业务错误。可能错误码：\n- 4084 invalid_open_api_user_id\n- 4133 base_table_not_found\n- 4140 base_record_not_found（record_title 找不到对应记录）\n- 4142 base_record_field_invalid\n- 4143 base_record_title_not_unique（record_title 对应多条记录）\n- 4199 base_ws_app_not_found\n- 4200 base_record_select_value_invalid\n- 4203 base_record_no_title_column（传 record_title 但表无 title 列）\n- 4204 base_record_multiple_title_columns（表有多个 title 列，无法解析）\n- 4210 base_open_id_invalid\n- 4213 base_record_key_invalid（REFERENCE 字段 record_key 不存在）",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/UpdateRecordResponse" }
+              }
+            }
+          },
+          "401": {
+            "description": "认证失败（4084）",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/UnauthorizedResponse" } } }
+          },
+          "400": {
+            "description": "DRF 字段校验失败（HTTP 400，body.code=400 validation_error）。可能场景：fields 缺失 / 为空对象、record_key+record_title 都没传、table_key+table_name 都没传。",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ValidationErrorResponse" } } }
+          }
+        }
+      },
+      "delete": {
+        "tags": ["表记录"],
+        "summary": "删除记录",
+        "description": "按 record_keys 或 record_titles 批量删除 1-100 条记录。",
+        "operationId": "deleteRecords",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/DeleteRecordsRequest" },
+              "example": { "table_key": "tbl_xxx", "record_keys": ["rec_abc", "rec_def"] }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "成功（code=200）或业务错误。可能错误码：\n- 4084 invalid_open_api_user_id\n- 4133 base_table_not_found\n- 4140 base_record_not_found\n- 4143 base_record_title_not_unique（record_title 对应多条记录）\n- 4199 base_ws_app_not_found\n- 4203 base_record_no_title_column\n- 4204 base_record_multiple_title_columns",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/DeleteRecordsResponse" },
+                "example": { "code": 200, "message": "success", "data": { "deleted_count": 2 } }
+              }
+            }
+          },
+          "401": {
+            "description": "认证失败（4084）",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/UnauthorizedResponse" } } }
+          },
+          "400": {
+            "description": "DRF 字段校验失败（HTTP 400，body.code=400 validation_error）。可能场景：record_keys 和 record_titles 都没传或都为空数组、table_key+table_name 都没传。",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ValidationErrorResponse" } } }
+          }
+        }
+      }
+    },
+    "/data/records/list": {
+      "post": {
+        "tags": ["表记录"],
+        "summary": "查询记录列表",
+        "description": "分页查询表中的记录，支持 filters 与 sort。",
+        "operationId": "listRecords",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/ListRecordsRequest" },
+              "example": {
+                "table_key": "tbl_xxx", "page_size": 20, "current_page": 1,
+                "filters": ["age:gte:18", "name:eq:张三"],
+                "sort": "created_at:desc"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "成功（code=200）或业务错误。可能错误码：\n- 4084 invalid_open_api_user_id\n- 4133 base_table_not_found\n- 4199 base_ws_app_not_found\n- 4210 base_open_id_invalid（filter 中 USER 字段 open_id 无效）",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ListRecordsResponse" }
+              }
+            }
+          },
+          "401": {
+            "description": "认证失败（4084）",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/UnauthorizedResponse" } } }
+          },
+          "400": {
+            "description": "DRF 字段校验失败（HTTP 400，body.code=400 validation_error）。可能场景：table_key+table_name 都没传、page_size 超出 1-100 范围。",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ValidationErrorResponse" } } }
+          }
+        }
+      }
+    },
+    "/data/records/batch-update": {
+      "post": {
+        "tags": ["表记录"],
+        "summary": "批量更新记录",
+        "description": "批量更新 1-100 条记录，每条按 record_key 或 record_title 定位。",
+        "operationId": "batchUpdateRecords",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/BatchUpdateRecordsRequest" },
+              "example": {
+                "table_key": "tbl_xxx",
+                "records": [
+                  { "record_key": "rec_abc", "fields": { "age": 30 } },
+                  { "record_title": "李四", "fields": { "age": 25 } }
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "成功（code=200）或业务错误。可能错误码：\n- 4084 invalid_open_api_user_id\n- 4133 base_table_not_found\n- 4140 base_record_not_found\n- 4142 base_record_field_invalid\n- 4143 base_record_title_not_unique（record_title 对应多条记录）\n- 4199 base_ws_app_not_found\n- 4200 base_record_select_value_invalid\n- 4203 base_record_no_title_column\n- 4204 base_record_multiple_title_columns\n- 4210 base_open_id_invalid\n- 4213 base_record_key_invalid（REFERENCE 字段 record_key 不存在）",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/InsertRecordsResponse" }
+              }
+            }
+          },
+          "401": {
+            "description": "认证失败（4084）",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/UnauthorizedResponse" } } }
+          },
+          "400": {
+            "description": "DRF 字段校验失败（HTTP 400，body.code=400 validation_error）。可能场景：records 缺失 / 为空数组 / 超 100 条、records 内某条 record_key+record_title 都没传、fields 空、table_key+table_name 都没传。",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ValidationErrorResponse" } } }
+          }
+        }
+      }
+    }
+  }
+}

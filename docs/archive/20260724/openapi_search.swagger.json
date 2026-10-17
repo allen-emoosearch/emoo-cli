@@ -1,0 +1,240 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "emoo 搜索能力 OpenAPI",
+    "version": "1.1.0",
+    "description": "文档检索与游标分页拉取：\n\n- `POST /search`：按关键词检索文档，支持分页与过滤\n- `POST /data`：游标分页批量拉取文档（不支持 keyword，适用于大数据量导出场景）\n\nfilter_conditions 为二维数组，外层 OR、内层 AND：`[[A, B], [C]]` 即 `(A AND B) OR C`。\n\n认证（获取 access_token）见 [认证模块](openapi_auth.swagger.json)；详细 filter field / operator 列表见 [OpenAPI 概览](openapi_overview.md)。",
+    "contact": { "name": "emoo", "url": "https://open.emooai.com" }
+  },
+  "servers": [
+    { "url": "http://localhost:8000/open-api/v1", "description": "本地开发" },
+    { "url": "https://app.emooai.com/open-api/v1", "description": "SaaS 生产" }
+  ],
+  "components": {
+    "securitySchemes": {
+      "BearerAuth": { "type": "http", "scheme": "bearer", "description": "Access Token 或 API Key（emoo_ 开头），格式：Bearer <token>" }
+    },
+    "schemas": {
+      "FilterCondition": {
+        "type": "object",
+        "description": "单条过滤条件，组合在 filter_conditions 二维数组中使用",
+        "properties": {
+          "field": {
+            "type": "string",
+            "enum": [
+              "id", "app_doc_id", "doc_group.id", "doc_group.app_group_id",
+              "app_updated_at", "app_created_at",
+              "ws_app.id", "ws_app.app_id", "author_ws_app_user_id", "ws_app.ws_app_key"
+            ],
+            "description": "字段名；ws_app.ws_app_key 由后端自动转换为 ws_app.id"
+          },
+          "operator": {
+            "type": "string",
+            "enum": ["eq", "neq", "in", "nin", "gte", "lte"],
+            "description": "操作符：eq/neq 单值；in/nin 多值数组；gte/lte 范围"
+          },
+          "value": {
+            "oneOf": [
+              { "type": "string" },
+              { "type": "integer" },
+              { "type": "array", "items": { "oneOf": [{ "type": "string" }, { "type": "integer" }] } }
+            ],
+            "description": "条件值，in/nin 用数组，其他用单值"
+          }
+        },
+        "required": ["field", "operator", "value"]
+      },
+      "DocGroupBrief": {
+        "type": "object",
+        "description": "文档分组信息",
+        "properties": {
+          "id": { "type": "integer" },
+          "app_group_id": { "type": "string", "nullable": true },
+          "app_group_name": { "type": "string", "nullable": true },
+          "app_group_desc": { "type": "string", "nullable": true },
+          "url": { "type": "string", "nullable": true }
+        },
+        "required": ["id"]
+      },
+      "WsAppBrief": {
+        "type": "object",
+        "description": "文档所属应用信息",
+        "properties": {
+          "id": { "type": "integer" },
+          "title": { "type": "string", "nullable": true },
+          "ws_app_key": { "type": "string", "nullable": true },
+          "app_id": { "type": "integer", "nullable": true },
+          "app_name": { "type": "string", "nullable": true }
+        },
+        "required": ["id"]
+      },
+      "DocInfo": {
+        "type": "object",
+        "description": "文档信息",
+        "properties": {
+          "id": { "type": "integer", "description": "文档 ID" },
+          "app_doc_id": { "type": "string", "nullable": true, "description": "应用侧文档 ID" },
+          "title": { "type": "string", "nullable": true, "description": "文档标题" },
+          "url": { "type": "string", "nullable": true, "description": "文档链接" },
+          "app_created_at": { "type": "string", "format": "date-time", "nullable": true, "description": "应用侧创建时间" },
+          "app_updated_at": { "type": "string", "format": "date-time", "nullable": true, "description": "应用侧更新时间" },
+          "content_type": { "type": "string", "enum": ["text", "json"], "nullable": true, "description": "内容类型" },
+          "content": { "type": "string", "nullable": true, "description": "文档内容；text_format=plain 时去除 HTML 标签" },
+          "doc_group": { "$ref": "#/components/schemas/DocGroupBrief", "description": "文档分组信息，可能为 null" },
+          "ws_app": { "$ref": "#/components/schemas/WsAppBrief", "description": "所属应用信息，可能为 null" }
+        },
+        "required": ["id"]
+      },
+      "SearchRequest": {
+        "type": "object",
+        "description": "搜索请求体。keyword 不校验必填，但建议传以触发关键词召回（不传时等同全量过滤查询）",
+        "properties": {
+          "keyword": { "type": "string", "nullable": true, "description": "搜索关键词（建议必填）" },
+          "ws_agent_key": { "type": "string", "nullable": true, "description": "Agent 标识，限定搜索范围" },
+          "current_page": { "type": "integer", "description": "页码，默认 1（代码不强制 minimum）" },
+          "page_size": { "type": "integer", "description": "每页数量，默认 50；超过 200 自动 clamp 到 200（代码不强制 minimum）" },
+          "text_format": { "type": "string", "enum": ["plain", "markdown"], "default": "plain", "description": "文本格式，默认 plain" },
+          "filter_conditions": {
+            "type": "array",
+            "description": "过滤条件二维数组（外层 OR、内层 AND）",
+            "items": { "type": "array", "items": { "$ref": "#/components/schemas/FilterCondition" } }
+          }
+        }
+      },
+      "SearchResponse": {
+        "type": "object",
+        "properties": {
+          "code": { "type": "integer", "example": 200 },
+          "message": { "type": "string", "example": "success" },
+          "data": {
+            "type": "object",
+            "properties": {
+              "total": { "type": "integer" },
+              "page_size": { "type": "integer" },
+              "current_page": { "type": "integer" },
+              "total_pages": { "type": "integer" },
+              "results": { "type": "array", "items": { "$ref": "#/components/schemas/DocInfo" } }
+            }
+          }
+        }
+      },
+      "CursorListRequest": {
+        "type": "object",
+        "description": "游标分页拉取请求体（不支持 keyword / ws_agent_key）",
+        "properties": {
+          "cursor": { "type": "string", "nullable": true, "description": "游标，首次请求不传" },
+          "page_size": { "type": "integer", "description": "每页数量，默认 50；超过 200 自动 clamp 到 200" },
+          "text_format": { "type": "string", "enum": ["plain", "markdown"], "default": "plain" },
+          "filter_conditions": {
+            "type": "array",
+            "description": "过滤条件二维数组（外层 OR、内层 AND）",
+            "items": { "type": "array", "items": { "$ref": "#/components/schemas/FilterCondition" } }
+          }
+        }
+      },
+      "CursorListResponse": {
+        "type": "object",
+        "properties": {
+          "code": { "type": "integer", "example": 200 },
+          "message": { "type": "string", "example": "success" },
+          "data": {
+            "type": "object",
+            "properties": {
+              "page_size": { "type": "integer" },
+              "has_more": { "type": "boolean", "description": "是否还有更多数据" },
+              "next_cursor": { "type": "string", "nullable": true, "description": "下一页游标，无更多数据时为 null" },
+              "results": { "type": "array", "items": { "$ref": "#/components/schemas/DocInfo" } }
+            }
+          }
+        }
+      },
+      "ErrorResponse": {
+        "type": "object",
+        "description": "业务错误响应（HTTP 状态 200，错误码在 body.code；认证类错误实际 HTTP 401）",
+        "properties": {
+          "code": { "type": "integer" },
+          "message": { "type": "string" },
+          "data": { "type": "object", "nullable": true }
+        }
+      },
+      "UnauthorizedResponse": {
+        "type": "object",
+        "description": "认证失败",
+        "properties": {
+          "code": { "type": "integer", "example": 4084 },
+          "message": { "type": "string", "example": "invalid_open_api_user_id" },
+          "data": { "type": "object", "nullable": true }
+        }
+      }
+    }
+  },
+  "security": [{ "BearerAuth": [] }],
+  "tags": [{ "name": "搜索能力", "description": "文档检索与游标分页拉取" }],
+  "paths": {
+    "/search": {
+      "post": {
+        "tags": ["搜索能力"],
+        "summary": "搜索文档",
+        "description": "按关键词检索用户可见的文档，支持分页与过滤。结果按用户权限过滤，仅返回可见文档。",
+        "operationId": "searchDocs",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/SearchRequest" },
+              "example": {
+                "keyword": "测试文档", "page_size": 10, "text_format": "plain",
+                "filter_conditions": [ [{ "field": "ws_app.ws_app_key", "operator": "eq", "value": "wapp_xxx" }] ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "成功（code=200）或业务错误（HTTP 仍 200）。可能错误码：\n- 4084 invalid_open_api_user_id（缺 Emoo-User-Id 或用户不存在）\n- 4092 invalid_open_api_ws_agent_key（ws_agent_key 不存在）",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/SearchResponse" }
+              }
+            }
+          },
+          "401": {
+            "description": "认证失败（4084）",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/UnauthorizedResponse" } } }
+          }
+        }
+      }
+    },
+    "/data": {
+      "post": {
+        "tags": ["搜索能力"],
+        "summary": "游标分页批量拉取文档",
+        "description": "适用于大数据量场景的游标分页拉取，不支持 keyword / ws_agent_key。\n\n- 首次请求不传 cursor，后续请求带上一次响应的 next_cursor。\n- has_more=false 时 next_cursor 为 null，拉取结束。",
+        "operationId": "listDataByCursor",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/CursorListRequest" },
+              "example": { "page_size": 100, "cursor": "eyJwYWdlIjoxfQ==" }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "成功（code=200）或业务错误。可能错误码：\n- 4084 invalid_open_api_user_id",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/CursorListResponse" }
+              }
+            }
+          },
+          "401": {
+            "description": "认证失败（4084）",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/UnauthorizedResponse" } } }
+          }
+        }
+      }
+    }
+  }
+}

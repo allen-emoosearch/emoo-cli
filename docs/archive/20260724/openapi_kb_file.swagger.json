@@ -1,0 +1,309 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "emoo 文件管理 OpenAPI",
+    "version": "1.1.0",
+    "description": "客户端直传对象存储模式的文件上传与下载接口，配合数据表 FILE 类型字段使用。\n\n上传流程与调用方最简实现代码见 [文件上传流程](openapi_kb_file.md)。\n\n约束：\n- 单文件最大 100 MB\n- 单次批量凭证/确认最多 20 个文件\n- 上传凭证 1h 过期，下载链接 24h 过期\n\n调用方无需关心底层 storage provider（MinIO / OSS / S3 / 其他），`upload` 字段是统一指令。",
+    "contact": { "name": "emoo", "url": "https://open.emooai.com" }
+  },
+  "servers": [
+    { "url": "http://localhost:8000/open-api/v1", "description": "本地开发" },
+    { "url": "https://app.emooai.com/open-api/v1", "description": "SaaS 生产" }
+  ],
+  "components": {
+    "securitySchemes": {
+      "BearerAuth": { "type": "http", "scheme": "bearer", "description": "Access Token 或 API Key（emoo_ 开头），格式：Bearer <token>" }
+    },
+    "schemas": {
+      "UploadInstruction": {
+        "oneOf": [
+          {
+            "type": "object",
+            "description": "PUT 直传（如 MinIO presigned URL）",
+            "properties": {
+              "method": { "type": "string", "enum": ["PUT"] },
+              "url": { "type": "string", "description": "直传目标 URL" },
+              "headers": { "type": "object", "description": "调用方需附加的 HTTP headers（一般为空）" },
+              "form_fields": { "type": "object", "description": "PUT 时为空 {}" },
+              "file_field": { "type": "null", "description": "PUT 时为 null" }
+            },
+            "required": ["method", "url", "headers", "form_fields", "file_field"]
+          },
+          {
+            "type": "object",
+            "description": "POST multipart 表单（如 OSS）",
+            "properties": {
+              "method": { "type": "string", "enum": ["POST"] },
+              "url": { "type": "string", "description": "直传目标 URL（host）" },
+              "headers": { "type": "object", "description": "调用方需附加的 HTTP headers（一般为空）" },
+              "form_fields": {
+                "type": "object",
+                "description": "POST 时的附加 multipart 字段（OSSAccessKeyId / policy / Signature / key 等，不含文件本身）",
+                "additionalProperties": { "type": "string" }
+              },
+              "file_field": { "type": "string", "description": "POST 时文件在 form 里的字段名（默认 file）" }
+            },
+            "required": ["method", "url", "headers", "form_fields", "file_field"]
+          }
+        ]
+      },
+      "UploadCredentialsItem": {
+        "type": "object",
+        "description": "请求上传凭证的单个文件信息",
+        "properties": {
+          "file_name": { "type": "string", "maxLength": 500, "description": "文件名（含扩展名），≤500 字符" },
+          "file_size": { "type": "integer", "minimum": 1, "maximum": 104857600, "description": "文件字节数，1 - 104857600（100 MB）" },
+          "mime_type": { "type": "string", "maxLength": 100, "description": "MIME 类型，≤100 字符；可不传，默认空串" }
+        },
+        "required": ["file_name", "file_size"]
+      },
+      "UploadCredentialsRequest": {
+        "type": "object",
+        "properties": {
+          "files": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 20,
+            "items": { "$ref": "#/components/schemas/UploadCredentialsItem" }
+          }
+        },
+        "required": ["files"]
+      },
+      "UploadCredentialsResult": {
+        "type": "object",
+        "description": "单个文件的上传凭证结果",
+        "properties": {
+          "file_key": { "type": "string", "description": "emoo 分配的文件 key，confirm 时回传" },
+          "file_name": { "type": "string" },
+          "file_size": { "type": "integer" },
+          "mime_type": { "type": "string", "description": "未传时为空串" },
+          "upload": { "$ref": "#/components/schemas/UploadInstruction" }
+        },
+        "required": ["file_key", "file_name", "file_size", "mime_type", "upload"]
+      },
+      "UploadCredentialsResponse": {
+        "type": "object",
+        "properties": {
+          "code": { "type": "integer", "example": 200 },
+          "message": { "type": "string", "example": "success" },
+          "data": { "type": "array", "items": { "$ref": "#/components/schemas/UploadCredentialsResult" } }
+        }
+      },
+      "FileConfirmItem": {
+        "type": "object",
+        "description": "确认上传完成的单个文件信息",
+        "properties": {
+          "file_key": { "type": "string", "maxLength": 255, "description": "上一步拿到的 file_key" },
+          "file_name": { "type": "string", "maxLength": 500 },
+          "file_size": { "type": "integer", "minimum": 1, "maximum": 104857600, "description": "文件字节数，1 - 104857600（100 MB）" },
+          "mime_type": { "type": "string", "maxLength": 100, "description": "MIME 类型，≤100 字符；可不传，默认空串" }
+        },
+        "required": ["file_key", "file_name", "file_size"]
+      },
+      "FileConfirmRequest": {
+        "type": "object",
+        "properties": {
+          "files": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 20,
+            "items": { "$ref": "#/components/schemas/FileConfirmItem" }
+          }
+        },
+        "required": ["files"]
+      },
+      "FileConfirmResult": {
+        "type": "object",
+        "properties": {
+          "file_key": { "type": "string" },
+          "url": { "type": "string", "description": "24h 有效下载链接" }
+        },
+        "required": ["file_key", "url"]
+      },
+      "FileConfirmResponse": {
+        "type": "object",
+        "properties": {
+          "code": { "type": "integer", "example": 200 },
+          "message": { "type": "string", "example": "success" },
+          "data": { "type": "array", "items": { "$ref": "#/components/schemas/FileConfirmResult" } }
+        }
+      },
+      "DownloadUrlResponse": {
+        "type": "object",
+        "properties": {
+          "code": { "type": "integer", "example": 200 },
+          "message": { "type": "string", "example": "success" },
+          "data": {
+            "type": "object",
+            "properties": { "url": { "type": "string", "description": "24h 有效下载链接" } },
+            "required": ["url"]
+          }
+        }
+      },
+      "ErrorResponse": {
+        "type": "object",
+        "description": "业务错误响应（HTTP 状态 200，错误码在 body.code）",
+        "properties": {
+          "code": { "type": "integer" },
+          "message": { "type": "string" },
+          "data": { "type": "object", "nullable": true }
+        }
+      },
+      "UnauthorizedResponse": {
+        "type": "object",
+        "description": "认证失败（4084）",
+        "properties": {
+          "code": { "type": "integer", "example": 4084 },
+          "message": { "type": "string", "example": "invalid_open_api_user_id" },
+          "data": { "type": "object", "nullable": true }
+        }
+      },
+      "ValidationErrorResponse": {
+        "type": "object",
+        "description": "DRF 字段校验失败响应（HTTP 400，body.code=400 validation_error）。触发场景取决于请求 schema 的字段约束（required / maxLength / minItems / minimum / maximum 等）。",
+        "properties": {
+          "code": { "type": "integer", "example": 400 },
+          "message": { "type": "string", "example": "validation_error" },
+          "data": { "type": "object", "nullable": true }
+        }
+      }
+    }
+  },
+  "security": [{ "BearerAuth": [] }],
+  "tags": [{ "name": "文件管理", "description": "客户端直传对象存储的上传凭证、确认、下载链接" }],
+  "paths": {
+    "/data/files/upload-credentials": {
+      "post": {
+        "tags": ["文件管理"],
+        "summary": "获取一批文件的上传凭证",
+        "description": "为 1-20 个文件生成直传凭证与 `file_key`。返回的 `upload` 字段是统一指令：`method=PUT` 时直接 PUT 二进制到 url；`method=POST` 时构造 multipart 表单（form_fields + file_field）。\n\n凭证 1h 过期。",
+        "operationId": "getUploadCredentials",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/UploadCredentialsRequest" },
+              "example": {
+                "files": [
+                  { "file_name": "report.pdf", "file_size": 102400, "mime_type": "application/pdf" },
+                  { "file_name": "photo.jpg", "file_size": 204800 }
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "成功（code=200）或业务错误（HTTP 仍 200）。可能错误码：\n- 4015 invalid_params（参数缺失或格式不合法）\n- 4035 file_too_large（单文件超过 100 MB）\n- 4084 invalid_open_api_user_id\n- 500 server_error（后端识别不了 storage provider，极少出现，联系管理员）",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/UploadCredentialsResponse" },
+                "examples": {
+                  "success": {
+                    "value": {
+                      "code": 200, "message": "success",
+                      "data": [{
+                        "file_key": "fk_xxx1", "file_name": "report.pdf", "file_size": 102400, "mime_type": "application/pdf",
+                        "upload": { "method": "PUT", "url": "https://minio.example.com/fk_xxx1?signature=...", "headers": {}, "form_fields": {}, "file_field": null }
+                      }]
+                    }
+                  },
+                  "too_large": {
+                    "description": "4035 文件超过 100 MB",
+                    "value": { "code": 4035, "message": "file_too_large", "data": null }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "认证失败（4084）",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/UnauthorizedResponse" } } }
+          },
+          "400": {
+            "description": "DRF 字段校验失败（HTTP 400，body.code=400 validation_error）。可能场景：files 缺失 / 为空数组 / 超 20 个、file_name 超 500 字符、file_size 超出 1-104857600 范围、mime_type 超 100 字符。",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ValidationErrorResponse" } } }
+          }
+        }
+      }
+    },
+    "/data/files/confirm": {
+      "post": {
+        "tags": ["文件管理"],
+        "summary": "确认文件上传完成",
+        "description": "客户端直传对象存储完成后调用，通知 emoo 该 `file_key` 已存在并创建文件元数据记录。返回每个文件的 24h 下载链接。",
+        "operationId": "confirmFileUpload",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/FileConfirmRequest" },
+              "example": { "files": [ { "file_key": "fk_xxx1", "file_name": "report.pdf", "file_size": 102400 } ] }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "成功（code=200）或业务错误。可能错误码：\n- 4015 invalid_params（参数缺失或格式不合法）\n- 4034 file_already_exists（file_key 已 confirm 过）\n- 4084 invalid_open_api_user_id（request.user 为空，OAuth 模式下未传 Emoo-User-Id）",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/FileConfirmResponse" },
+                "examples": {
+                  "success": {
+                    "value": { "code": 200, "message": "success", "data": [ { "file_key": "fk_xxx1", "url": "https://minio.example.com/dl/fk_xxx1?signature=..." } ] }
+                  },
+                  "already_exists": {
+                    "description": "4034 file_key 已 confirm 过",
+                    "value": { "code": 4034, "message": "file_already_exists", "data": null }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "认证失败（4084）",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/UnauthorizedResponse" } } }
+          },
+          "400": {
+            "description": "DRF 字段校验失败（HTTP 400，body.code=400 validation_error）。可能场景：files 缺失 / 为空数组 / 超 20 个、file_key 超 255 字符、file_name 超 500 字符、file_size 超出 1-104857600 范围。",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ValidationErrorResponse" } } }
+          }
+        }
+      }
+    },
+    "/data/files/download-url": {
+      "get": {
+        "tags": ["文件管理"],
+        "summary": "获取文件下载链接",
+        "description": "获取一个 24 小时有效的下载链接。confirm 返回的 URL 过期后用此接口刷新。",
+        "operationId": "getFileDownloadUrl",
+        "parameters": [
+          { "name": "file_key", "in": "query", "required": true, "schema": { "type": "string" }, "description": "文件 file_key" }
+        ],
+        "responses": {
+          "200": {
+            "description": "成功（code=200）或业务错误。可能错误码：\n- 4015 invalid_params（缺 file_key 参数）\n- 4041 file_not_found（file_key 不存在）\n- 4084 invalid_open_api_user_id",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/DownloadUrlResponse" },
+                "examples": {
+                  "success": {
+                    "value": { "code": 200, "message": "success", "data": { "url": "https://minio.example.com/dl/fk_xxx1?signature=..." } }
+                  },
+                  "not_found": {
+                    "description": "4041 file_key 不存在",
+                    "value": { "code": 4041, "message": "file_not_found", "data": null }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "认证失败（4084）",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/UnauthorizedResponse" } } }
+          }
+        }
+      }
+    }
+  }
+}

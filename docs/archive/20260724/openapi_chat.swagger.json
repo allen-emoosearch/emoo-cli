@@ -1,0 +1,255 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "emoo 对话能力 OpenAPI",
+    "version": "1.1.0",
+    "description": "AI 对话接口：创建对话、查询对话列表、发送消息。\n\n- `POST /chat`：创建对话（可指定标题）\n- `GET /chat`：分页查询对话列表\n- `POST /chat/messages`：发送消息，支持 `stream=true` 走 SSE 流式响应或一次性返回\n\nSSE 事件类型：`status` / `message_id` / `token` / `done` / `error`。",
+    "contact": { "name": "emoo", "url": "https://open.emooai.com" }
+  },
+  "servers": [
+    { "url": "http://localhost:8000/open-api/v1", "description": "本地开发" },
+    { "url": "https://app.emooai.com/open-api/v1", "description": "SaaS 生产" }
+  ],
+  "components": {
+    "securitySchemes": {
+      "BearerAuth": { "type": "http", "scheme": "bearer", "description": "Access Token 或 API Key（emoo_ 开头），格式：Bearer <token>" }
+    },
+    "schemas": {
+      "ChatInfo": {
+        "type": "object",
+        "description": "对话信息",
+        "properties": {
+          "id": { "type": "integer", "description": "对话 ID" },
+          "title": { "type": "string", "nullable": true, "description": "对话标题" },
+          "created_at": { "type": "string", "format": "date-time" },
+          "updated_at": { "type": "string", "format": "date-time" }
+        },
+        "required": ["id"]
+      },
+      "ChatListResponse": {
+        "type": "object",
+        "properties": {
+          "code": { "type": "integer", "example": 200 },
+          "message": { "type": "string", "example": "success" },
+          "data": {
+            "type": "object",
+            "properties": {
+              "total": { "type": "integer" },
+              "page_size": { "type": "integer" },
+              "current_page": { "type": "integer" },
+              "total_pages": { "type": "integer" },
+              "results": { "type": "array", "items": { "$ref": "#/components/schemas/ChatInfo" } }
+            },
+            "required": ["total", "page_size", "current_page", "total_pages", "results"]
+          }
+        }
+      },
+      "CreateChatRequest": {
+        "type": "object",
+        "properties": {
+          "title": { "type": "string", "nullable": true, "description": "对话标题（可选）" }
+        }
+      },
+      "CreateChatResponse": {
+        "type": "object",
+        "properties": {
+          "code": { "type": "integer", "example": 200 },
+          "message": { "type": "string", "example": "success" },
+          "data": {
+            "type": "object",
+            "properties": { "chat_id": { "type": "integer" } },
+            "required": ["chat_id"]
+          }
+        }
+      },
+      "AddChatMessageRequest": {
+        "type": "object",
+        "properties": {
+          "chat_id": { "type": "integer", "nullable": true, "description": "对话 ID；不传则创建新对话" },
+          "query": { "type": "string", "description": "用户问题（必填，不能为空）" },
+          "file_list": {
+            "type": "array",
+            "nullable": true,
+            "maxItems": 10,
+            "items": { "type": "string" },
+            "description": "关联文件 file_key 列表，最多 10 个"
+          },
+          "ws_agent_key": { "type": "string", "nullable": true, "description": "Agent 标识" },
+          "stream": { "type": "boolean", "nullable": true, "description": "是否流式返回（默认 false）" }
+        },
+        "required": ["query"]
+      },
+      "ChatMessageResponse": {
+        "type": "object",
+        "description": "非流式响应（stream=false 或不传）",
+        "properties": {
+          "code": { "type": "integer", "example": 200 },
+          "message": { "type": "string", "example": "success" },
+          "data": {
+            "type": "object",
+            "properties": {
+              "chat_id": { "type": "integer" },
+              "complete_response": { "type": "string", "description": "AI 完整回答（已替换文档引用为标题）" },
+              "message_id": { "type": "integer", "description": "本次消息 ID" }
+            },
+            "required": ["chat_id", "complete_response", "message_id"]
+          }
+        }
+      },
+      "ErrorResponse": {
+        "type": "object",
+        "description": "业务错误响应（HTTP 状态 200，错误码在 body.code）",
+        "properties": {
+          "code": { "type": "integer", "description": "业务错误码" },
+          "message": { "type": "string" },
+          "data": { "type": "object", "nullable": true }
+        }
+      },
+      "ValidationErrorResponse": {
+        "type": "object",
+        "description": "DRF 字段校验失败响应（HTTP 400，body.code=400 validation_error）",
+        "properties": {
+          "code": { "type": "integer", "example": 400 },
+          "message": { "type": "string", "example": "validation_error" },
+          "data": { "type": "object", "nullable": true }
+        }
+      },
+      "UnauthorizedResponse": {
+        "type": "object",
+        "description": "认证失败（4084）",
+        "properties": {
+          "code": { "type": "integer", "example": 4084 },
+          "message": { "type": "string", "example": "invalid_open_api_user_id" },
+          "data": { "type": "object", "nullable": true }
+        }
+      }
+    }
+  },
+  "security": [{ "BearerAuth": [] }],
+  "tags": [
+    { "name": "对话能力", "description": "AI 对话创建、查询、消息发送" }
+  ],
+  "paths": {
+    "/chat": {
+      "get": {
+        "tags": ["对话能力"],
+        "summary": "获取对话列表",
+        "description": "分页返回当前用户的对话列表。",
+        "operationId": "listChats",
+        "parameters": [
+          { "name": "current_page", "in": "query", "required": false, "schema": { "type": "integer", "default": 1 }, "description": "页码，默认 1" },
+          { "name": "page_size", "in": "query", "required": false, "schema": { "type": "integer", "default": 50 }, "description": "每页数量，默认 50" }
+        ],
+        "responses": {
+          "200": {
+            "description": "成功（code=200）或业务错误。可能错误码：\n- 4084 invalid_open_api_user_id（缺 Emoo-User-Id 或用户不存在）",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ChatListResponse" },
+                "example": {
+                  "code": 200, "message": "success",
+                  "data": {
+                    "total": 20, "page_size": 50, "current_page": 1, "total_pages": 1,
+                    "results": [{ "id": 123, "title": "对话标题", "created_at": "2026-01-01T00:00:00Z", "updated_at": "2026-01-02T00:00:00Z" }]
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "认证失败（4084）",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/UnauthorizedResponse" } } }
+          },
+          "400": {
+            "description": "DRF 字段校验失败（HTTP 400，body.code=400 validation_error）。可能场景：\n- current_page / page_size 传非整数",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ValidationErrorResponse" } } }
+          }
+        }
+      },
+      "post": {
+        "tags": ["对话能力"],
+        "summary": "创建对话",
+        "description": "创建一个新对话，返回 chat_id。",
+        "operationId": "createChat",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/CreateChatRequest" },
+              "example": { "title": "新对话" }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "成功（code=200）或业务错误。可能错误码：\n- 4084 invalid_open_api_user_id",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/CreateChatResponse" },
+                "example": { "code": 200, "message": "success", "data": { "chat_id": 123 } }
+              }
+            }
+          },
+          "401": {
+            "description": "认证失败（4084）",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/UnauthorizedResponse" } } }
+          }
+        }
+      }
+    },
+    "/chat/messages": {
+      "post": {
+        "tags": ["对话能力"],
+        "summary": "发送对话消息",
+        "description": "发送用户问题，返回 AI 回答。支持两种返回模式：\n\n- `stream=false`（默认）：HTTP 一次性返回 `{chat_id, complete_response, message_id}`\n- `stream=true`：返回 SSE 流，事件类型 `status` / `message_id` / `token` / `done` / `error`\n\n- `chat_id` 不传则自动创建新对话。\n- `file_list` 最多 10 个 file_key。",
+        "operationId": "addChatMessage",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/AddChatMessageRequest" },
+              "example": {
+                "chat_id": 123, "query": "请帮我总结这份文档",
+                "file_list": ["fk_xxx"], "ws_agent_key": "agent_xxx", "stream": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "成功（code=200）或业务错误（HTTP 仍 200）。stream=true 时为 SSE 流。可能错误码：\n- 4044 chat_message_query_required（query 缺失或为空字符串）\n- 4084 invalid_open_api_user_id\n- 4092 invalid_open_api_ws_agent_key（ws_agent_key 不存在）",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ChatMessageResponse" },
+                "examples": {
+                  "success": {
+                    "value": {
+                      "code": 200, "message": "success",
+                      "data": { "chat_id": 123, "complete_response": "AI 回答内容", "message_id": 456 }
+                    }
+                  },
+                  "query_required": {
+                    "description": "4044 query 为空",
+                    "value": { "code": 4044, "message": "chat_message_query_required", "data": null }
+                  }
+                }
+              },
+              "text/event-stream": {
+                "schema": { "type": "string" },
+                "description": "SSE 流式响应，事件类型 status / message_id / token / done / error"
+              }
+            }
+          },
+          "401": {
+            "description": "认证失败（4084）",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/UnauthorizedResponse" } } }
+          },
+          "400": {
+            "description": "DRF 字段校验失败（HTTP 400，body.code=400 validation_error）。可能场景：\n- file_list 超过 10 个\n- chat_id / stream 传非预期类型（如 chat_id 传字符串）",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ValidationErrorResponse" } } }
+          }
+        }
+      }
+    }
+  }
+}

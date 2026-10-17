@@ -1,0 +1,77 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "emoo 认证 OpenAPI",
+    "version": "1.0.0",
+    "description": "OAuth 客户端模式获取 access_token：服务端对服务端集成的入口。\n\n本接口**不需要 Bearer 认证**（调用时尚未持有 token）。拿到 token 后，其他所有接口在 `Authorization: Bearer <token>` 头里带上即可。\n\n完整认证策略（Client ID/Secret vs API Key、Emoo-User-Id 头、token 缓存建议等）见 [OpenAPI 概览](openapi_overview.md) 的「认证方式」章节。",
+    "contact": { "name": "emoo", "url": "https://open.emooai.com" }
+  },
+  "servers": [
+    { "url": "http://localhost:8000/open-api/v1", "description": "本地开发" },
+    { "url": "https://app.emooai.com/open-api/v1", "description": "SaaS 生产" }
+  ],
+  "components": {
+    "schemas": {
+      "TokenResponse": {
+        "type": "object",
+        "properties": {
+          "code": { "type": "integer", "example": 200 },
+          "message": { "type": "string", "example": "success" },
+          "data": {
+            "type": "object",
+            "properties": {
+              "access_token": { "type": "string" },
+              "expires_in": { "type": "integer", "example": 7200, "description": "Token 有效期（秒），默认 7200 = 2 小时" },
+              "token_type": { "type": "string", "example": "Bearer" }
+            },
+            "required": ["access_token", "expires_in", "token_type"]
+          }
+        }
+      },
+      "ErrorResponse": {
+        "type": "object",
+        "description": "认证失败响应（HTTP 401，错误码在 body.code）",
+        "properties": {
+          "code": { "type": "integer" },
+          "message": { "type": "string" },
+          "data": { "type": "object", "nullable": true }
+        }
+      }
+    }
+  },
+  "tags": [{ "name": "认证", "description": "OAuth 客户端模式获取 access_token" }],
+  "paths": {
+    "/auth/token": {
+      "get": {
+        "tags": ["认证"],
+        "summary": "获取 Access Token",
+        "description": "OAuth 客户端模式获取 access_token，有效期 2 小时（7200 秒），建议缓存复用，避免频繁请求。\n\n此接口不需要 Bearer 认证（用户还没拿到 token）。\n\n调用方式：\n\n```bash\ncurl -X GET \"https://app.emooai.com/open-api/v1/auth/token?client_id=YOUR_ID&client_secret=YOUR_SECRET\"\n```",
+        "operationId": "generateToken",
+        "security": [],
+        "parameters": [
+          { "name": "client_id", "in": "query", "required": true, "schema": { "type": "string" }, "description": "在工作区管理后台创建 OAuth 客户端拿到的 client_id" },
+          { "name": "client_secret", "in": "query", "required": true, "schema": { "type": "string" }, "description": "客户端密钥" },
+          { "name": "grant_type", "in": "query", "required": false, "schema": { "type": "string", "default": "client_credentials" }, "description": "授权类型，默认 client_credentials" }
+        ],
+        "responses": {
+          "200": {
+            "description": "获取成功（code=200）",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/TokenResponse" },
+                "example": {
+                  "code": 200, "message": "success",
+                  "data": { "access_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...", "expires_in": 7200, "token_type": "Bearer" }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "client_id/secret 错误或 client 不可用。可能错误码：\n- 4015 invalid_params（client_id/client_secret 缺失或为空）\n- 4083 invalid_open_api_token（token 生成失败）\n- 4085 oauth_client_not_found（client_id 不存在或已禁用）",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } } }
+          }
+        }
+      }
+    }
+  }
+}

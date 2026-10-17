@@ -1,0 +1,495 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "emoo 通讯录 OpenAPI",
+    "version": "1.0.0",
+    "description": "工作区通讯录由两类实体组成：\n\n- **用户（ws_user）**：工作区里的成员，对外统一用 `open_id` 标识。\n- **角色（ws_group）**：用户的分组/权限受众，被 [Agent 管理](openapi_agent.swagger.json)（`scope=specified_ws_groups`）和 [表权限管理](openapi_kb_table_permission.swagger.json)（`audience.user_group_ids`）引用。\n\n典型集成流程：查询用户拿 `open_id` → 创建角色拿 `ws_group_id` → 把 `open_id` 批量加入角色。\n\n**通用约束**：\n- 用户类型 ws_user_type：1=工作区用户、2=管理员、3=拥有者。\n- 用户列表查询需 WS_USER VIEW 权限；批量更新需 WS_USER EDIT 权限。\n- PUT 批量更新用户返回**失败条目数组**（成功时为 `[]`），不会整体回滚——调用方需检查数组是否为空判断全成功。\n- 角色名 group_name 在 workspace 内唯一。\n- **group_desc 清空语义**：更新角色时传 group_desc=null 会被序列化器转为空串（即「清空描述」），不会保留原值。",
+    "contact": { "name": "emoo", "url": "https://open.emooai.com" }
+  },
+  "servers": [
+    { "url": "http://localhost:8000/open-api/v1", "description": "本地开发" },
+    { "url": "https://app.emooai.com/open-api/v1", "description": "SaaS 生产" }
+  ],
+  "components": {
+    "securitySchemes": {
+      "BearerAuth": { "type": "http", "scheme": "bearer", "description": "Access Token 或 API Key（emoo_ 开头），格式：Bearer <token>" }
+    },
+    "schemas": {
+      "WsGroupBrief": {
+        "type": "object",
+        "description": "用户所属角色（ws_group）简要信息",
+        "properties": {
+          "id": { "type": "integer" },
+          "group_name": { "type": "string" },
+          "workspace_id": { "type": "integer" },
+          "created_at": { "type": "string", "format": "date-time", "nullable": true },
+          "updated_at": { "type": "string", "format": "date-time", "nullable": true },
+          "avatar_url": { "type": "string", "nullable": true },
+          "avatar_file_key": { "type": "string", "nullable": true },
+          "group_desc": { "type": "string", "nullable": true }
+        },
+        "required": ["id", "group_name", "workspace_id"]
+      },
+      "WsUserInfo": {
+        "type": "object",
+        "description": "工作区用户信息",
+        "properties": {
+          "open_id": { "type": "string", "description": "用户 open_id" },
+          "user_id": { "type": "integer", "description": "用户 ID" },
+          "is_active": { "type": "boolean", "description": "是否激活" },
+          "workspace_id": { "type": "integer", "description": "工作区 ID" },
+          "ws_user_type": {
+            "type": "integer",
+            "enum": [1, 2, 3],
+            "description": "用户角色：1=工作区用户、2=工作区管理员、3=工作区拥有者"
+          },
+          "ws_username": { "type": "string", "nullable": true, "description": "用户名（缺失时回退到 display_name / username / mobile_num）" },
+          "created_at": { "type": "string", "format": "date-time", "nullable": true },
+          "updated_at": { "type": "string", "format": "date-time", "nullable": true },
+          "ws_group_list": {
+            "type": "array",
+            "nullable": true,
+            "items": { "$ref": "#/components/schemas/WsGroupBrief" },
+            "description": "所属角色列表"
+          },
+          "email": { "type": "string", "nullable": true },
+          "mobile_num": { "type": "string", "nullable": true },
+          "ext_info": { "type": "object", "nullable": true, "description": "扩展信息" }
+        },
+        "required": ["open_id", "user_id", "is_active", "workspace_id", "ws_user_type"]
+      },
+      "WsUserListResponse": {
+        "type": "object",
+        "properties": {
+          "code": { "type": "integer", "example": 200 },
+          "message": { "type": "string", "example": "success" },
+          "data": {
+            "type": "object",
+            "properties": {
+              "total": { "type": "integer" },
+              "page_size": { "type": "integer" },
+              "current_page": { "type": "integer" },
+              "total_pages": { "type": "integer" },
+              "results": { "type": "array", "items": { "$ref": "#/components/schemas/WsUserInfo" } }
+            },
+            "required": ["total", "page_size", "current_page", "total_pages", "results"]
+          }
+        }
+      },
+      "UpdateWsUserItem": {
+        "type": "object",
+        "description": "单个用户的更新项（批量更新请求体是此对象的数组）",
+        "properties": {
+          "open_id": { "type": "string", "description": "用户 open_id（必填，不能为空字符串）" },
+          "ws_username": { "type": "string", "nullable": true, "maxLength": 100, "description": "用户名，最长 100 字符，允许空串" },
+          "ext_info": { "type": "object", "nullable": true, "description": "扩展信息，默认 null" }
+        },
+        "required": ["open_id"]
+      },
+      "UpdateWsUserRequest": {
+        "type": "array",
+        "description": "批量更新请求体（数组，每个元素对应一个用户）",
+        "items": { "$ref": "#/components/schemas/UpdateWsUserItem" }
+      },
+      "UpdateWsUserFailedItem": {
+        "type": "object",
+        "description": "更新失败的条目（含失败原因）",
+        "properties": {
+          "open_id": { "type": "string", "description": "失败的 open_id" },
+          "ws_username": { "type": "string", "nullable": true },
+          "ext_info": { "type": "object", "nullable": true },
+          "failed_type": {
+            "type": "string",
+            "enum": ["open_id_not_found"],
+            "description": "失败原因枚举：open_id_not_found=该 open_id 在当前 workspace 不存在"
+          }
+        },
+        "required": ["open_id", "failed_type"]
+      },
+      "UpdateWsUserResponse": {
+        "type": "object",
+        "description": "批量更新响应：data 是失败条目数组。**成功时为空数组 []**；调用方检查 len(data)==0 判断全成功",
+        "properties": {
+          "code": { "type": "integer", "example": 200 },
+          "message": { "type": "string", "example": "success" },
+          "data": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/UpdateWsUserFailedItem" },
+            "description": "失败条目；空数组=全部成功"
+          }
+        }
+      },
+      "WsGroupInfo": {
+        "type": "object",
+        "description": "ws_group 信息",
+        "properties": {
+          "id": { "type": "integer", "description": "ws_group id" },
+          "group_name": { "type": "string", "description": "角色名称（workspace 内唯一）" },
+          "group_desc": { "type": "string", "nullable": true, "description": "角色描述" },
+          "created_at": { "type": "string", "format": "date-time" }
+        },
+        "required": ["id", "group_name", "created_at"]
+      },
+      "CreateWsGroupRequest": {
+        "type": "object",
+        "properties": {
+          "group_name": { "type": "string", "maxLength": 100, "description": "角色名称（workspace 内唯一）" },
+          "group_desc": { "type": "string", "nullable": true, "description": "角色描述（可选）" }
+        },
+        "required": ["group_name"]
+      },
+      "UpdateWsGroupRequest": {
+        "type": "object",
+        "description": "更新请求体。group_name 或 group_desc 至少传一项。group_desc=null 会被转成空串（清空描述）",
+        "properties": {
+          "group_name": { "type": "string", "maxLength": 100, "description": "新角色名（workspace 内唯一）" },
+          "group_desc": { "type": "string", "nullable": true, "description": "新描述；传 null=清空（转空串）" }
+        }
+      },
+      "AddMembersRequest": {
+        "type": "object",
+        "description": "批量加入成员请求体",
+        "properties": {
+          "open_ids": {
+            "type": "array",
+            "minItems": 1,
+            "items": { "type": "string", "minLength": 1 },
+            "description": "成员 open_id 列表（每个不能为空字符串）"
+          }
+        },
+        "required": ["open_ids"]
+      },
+      "WsGroupListResponse": {
+        "type": "object",
+        "properties": {
+          "code": { "type": "integer", "example": 200 },
+          "message": { "type": "string", "example": "success" },
+          "data": {
+            "type": "object",
+            "properties": {
+              "total": { "type": "integer" },
+              "page_size": { "type": "integer" },
+              "current_page": { "type": "integer" },
+              "total_pages": { "type": "integer" },
+              "results": { "type": "array", "items": { "$ref": "#/components/schemas/WsGroupInfo" } }
+            }
+          }
+        }
+      },
+      "WsGroupResponse": {
+        "type": "object",
+        "properties": {
+          "code": { "type": "integer", "example": 200 },
+          "message": { "type": "string", "example": "success" },
+          "data": { "$ref": "#/components/schemas/WsGroupInfo" }
+        }
+      },
+      "EmptyDataResponse": {
+        "type": "object",
+        "properties": {
+          "code": { "type": "integer", "example": 200 },
+          "message": { "type": "string", "example": "success" },
+          "data": { "type": "object", "nullable": true, "example": null }
+        }
+      },
+      "ErrorResponse": {
+        "type": "object",
+        "description": "业务错误响应（HTTP 状态 200，错误码在 body.code）",
+        "properties": {
+          "code": { "type": "integer" },
+          "message": { "type": "string" },
+          "data": { "type": "object", "nullable": true }
+        }
+      },
+      "UnauthorizedResponse": {
+        "type": "object",
+        "description": "认证失败（4084）",
+        "properties": {
+          "code": { "type": "integer", "example": 4084 },
+          "message": { "type": "string", "example": "invalid_open_api_user_id" },
+          "data": { "type": "object", "nullable": true }
+        }
+      },
+      "ValidationErrorResponse": {
+        "type": "object",
+        "description": "DRF 字段校验失败响应（HTTP 400，body.code=400 validation_error）。触发场景取决于请求 schema 的字段约束（required / maxLength / minItems / enum 等）。",
+        "properties": {
+          "code": { "type": "integer", "example": 400 },
+          "message": { "type": "string", "example": "validation_error" },
+          "data": { "type": "object", "nullable": true }
+        }
+      }
+    }
+  },
+  "security": [{ "BearerAuth": [] }],
+  "tags": [
+    { "name": "用户管理", "description": "工作区用户（ws_user）查询与批量更新" },
+    { "name": "角色管理", "description": "工作区角色（ws_group）CRUD + 成员管理" }
+  ],
+  "paths": {
+    "/ws-user": {
+      "get": {
+        "tags": ["用户管理"],
+        "summary": "获取工作区用户列表",
+        "description": "分页返回当前工作区下的用户列表，支持关键词搜索。\n\n- 需要 WS_USER VIEW 权限。\n- ws_username 缺失时按 display_name / username / mobile_num 顺序回退。\n- ws_group_list / email / mobile_num / ext_info 可能为 null。",
+        "operationId": "listWsUsers",
+        "parameters": [
+          { "name": "keyword", "in": "query", "required": false, "schema": { "type": "string" }, "description": "搜索关键词" },
+          { "name": "page_size", "in": "query", "required": false, "schema": { "type": "integer", "default": 50, "minimum": 1, "maximum": 100 }, "description": "每页数量，默认 50，最大 100" },
+          { "name": "current_page", "in": "query", "required": false, "schema": { "type": "integer", "default": 1, "minimum": 1 }, "description": "页码，默认 1" }
+        ],
+        "responses": {
+          "200": {
+            "description": "成功（code=200）或业务错误。可能错误码：\n- 4006 workspace_not_found（workspace 不存在或被删除）\n- 4084 invalid_open_api_user_id",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/WsUserListResponse" },
+                "examples": {
+                  "success": {
+                    "value": {
+                      "code": 200, "message": "success",
+                      "data": {
+                        "total": 50, "page_size": 50, "current_page": 1, "total_pages": 1,
+                        "results": [{
+                          "open_id": "ou_xxx", "user_id": 1, "is_active": true, "workspace_id": 1,
+                          "ws_user_type": 1, "ws_username": "张三",
+                          "created_at": "2026-01-01T00:00:00Z", "updated_at": "2026-01-02T00:00:00Z",
+                          "ws_group_list": [{ "id": 1, "group_name": "技术部", "workspace_id": 1 }],
+                          "email": "zhangsan@example.com", "mobile_num": "13800000001", "ext_info": null
+                        }]
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "认证失败（4084）或权限不足（403 forbidden）",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/UnauthorizedResponse" } } }
+          },
+          "400": {
+            "description": "DRF 字段校验失败（HTTP 400，body.code=400 validation_error）。可能场景：page_size 超出 1-100 范围、page_size / current_page 传非整数。",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ValidationErrorResponse" } } }
+          }
+        }
+      },
+      "put": {
+        "tags": ["用户管理"],
+        "summary": "批量更新用户信息",
+        "description": "请求体为数组，每个元素更新一个用户。\n\n- 需要 WS_USER EDIT 权限。\n- open_id 必填，ws_username / ext_info 可选。\n- **响应 data 是失败条目数组**（含 failed_type），成功时为 `[]`；不会整体回滚，调用方需检查数组是否为空判断全成功。",
+        "operationId": "updateWsUsers",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/UpdateWsUserRequest" },
+              "example": [
+                { "open_id": "ou_xxx", "ws_username": "张三", "ext_info": { "department": "技术部" } },
+                { "open_id": "ou_unknown", "ws_username": "不存在的人" }
+              ]
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "成功（code=200）。可能错误码：\n- 4006 workspace_not_found\n- 4084 invalid_open_api_user_id\n\n注意：单条用户不存在不会返 4xxx，而是进入响应 data 失败数组（failed_type=open_id_not_found）。",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/UpdateWsUserResponse" },
+                "examples": {
+                  "all_success": {
+                    "summary": "全部成功（data=[]）",
+                    "value": { "code": 200, "message": "success", "data": [] }
+                  },
+                  "partial_failure": {
+                    "summary": "部分失败（data 含失败条目）",
+                    "value": {
+                      "code": 200, "message": "success",
+                      "data": [
+                        { "open_id": "ou_unknown", "ws_username": "不存在的人", "ext_info": null, "failed_type": "open_id_not_found" }
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "认证失败（4084）或权限不足（403 forbidden）",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/UnauthorizedResponse" } } }
+          },
+          "400": {
+            "description": "DRF 字段校验失败（HTTP 400，body.code=400 validation_error）。可能场景：请求体非数组、某条 open_id 缺失或为空串、ws_username 超过 100 字符。",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ValidationErrorResponse" } } }
+          }
+        }
+      }
+    },
+    "/ws-groups": {
+      "get": {
+        "tags": ["角色管理"],
+        "summary": "获取角色列表",
+        "description": "分页查询当前 workspace 下的角色列表。",
+        "operationId": "listWsGroups",
+        "parameters": [
+          { "name": "keyword", "in": "query", "required": false, "schema": { "type": "string" }, "description": "按 group_name 模糊搜索" },
+          { "name": "page_size", "in": "query", "required": false, "schema": { "type": "integer", "default": 20, "minimum": 1, "maximum": 200 } },
+          { "name": "current_page", "in": "query", "required": false, "schema": { "type": "integer", "default": 1, "minimum": 1 } }
+        ],
+        "responses": {
+          "200": {
+            "description": "成功（code=200）或业务错误。可能错误码：\n- 4084 invalid_open_api_user_id",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/WsGroupListResponse" } } }
+          },
+          "401": {
+            "description": "认证失败（4084）",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/UnauthorizedResponse" } } }
+          },
+          "400": {
+            "description": "DRF 字段校验失败（HTTP 400，body.code=400 validation_error）。可能场景：page_size 超出 1-200 范围、page_size / current_page 传非整数。",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ValidationErrorResponse" } } }
+          }
+        }
+      },
+      "post": {
+        "tags": ["角色管理"],
+        "summary": "创建角色",
+        "description": "创建一个新的工作区角色。group_name 在 workspace 内唯一。",
+        "operationId": "createWsGroup",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/CreateWsGroupRequest" },
+              "example": { "group_name": "技术部", "group_desc": "技术部成员" }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "成功（code=200）或业务错误。可能错误码：\n- 4029 ws_group_name_exists（group_name 已存在）\n- 4084 invalid_open_api_user_id",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/WsGroupResponse" } } }
+          },
+          "401": {
+            "description": "认证失败（4084）",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/UnauthorizedResponse" } } }
+          },
+          "400": {
+            "description": "DRF 字段校验失败（HTTP 400，body.code=400 validation_error）。可能场景：group_name 缺失 / 为空串 / 超过 100 字符。",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ValidationErrorResponse" } } }
+          }
+        }
+      }
+    },
+    "/ws-groups/{ws_group_id}": {
+      "parameters": [
+        { "name": "ws_group_id", "in": "path", "required": true, "schema": { "type": "integer" }, "description": "角色 id" }
+      ],
+      "patch": {
+        "tags": ["角色管理"],
+        "summary": "更新角色",
+        "description": "更新角色名/描述。group_name 或 group_desc 至少传一项；group_desc=null 会被转成空串（清空描述）。",
+        "operationId": "partialUpdateWsGroup",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/UpdateWsGroupRequest" },
+              "examples": {
+                "rename": { "value": { "group_name": "技术部 v2" } },
+                "clear_desc": { "summary": "清空描述", "value": { "group_desc": null } }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "成功（code=200）或业务错误。可能错误码：\n- 4029 ws_group_name_exists（改名时新名字已被占用）\n- 4031 ws_group_not_found（ws_group_id 不存在）\n- 4084 invalid_open_api_user_id",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/WsGroupResponse" } } }
+          },
+          "401": {
+            "description": "认证失败（4084）",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/UnauthorizedResponse" } } }
+          },
+          "400": {
+            "description": "DRF 字段校验失败（HTTP 400，body.code=400 validation_error）。可能场景：group_name 和 group_desc 都没传、group_name 为空串或超过 100 字符。",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ValidationErrorResponse" } } }
+          }
+        }
+      },
+      "delete": {
+        "tags": ["角色管理"],
+        "summary": "删除角色",
+        "description": "物理删除角色。删除后引用此角色的 Agent scope 会自动失效。",
+        "operationId": "destroyWsGroup",
+        "responses": {
+          "200": {
+            "description": "成功（code=200）或业务错误。可能错误码：\n- 4031 ws_group_not_found\n- 4084 invalid_open_api_user_id",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/EmptyDataResponse" } } }
+          },
+          "401": {
+            "description": "认证失败（4084）",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/UnauthorizedResponse" } } }
+          }
+        }
+      }
+    },
+    "/ws-groups/{ws_group_id}/members": {
+      "parameters": [
+        { "name": "ws_group_id", "in": "path", "required": true, "schema": { "type": "integer" }, "description": "角色 id" }
+      ],
+      "post": {
+        "tags": ["角色管理"],
+        "summary": "批量加入成员",
+        "description": "向角色批量加入成员（按 open_id 标识）。open_id 通过 [用户管理](#tag-用户管理) 接口获取。",
+        "operationId": "addWsGroupMembers",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/AddMembersRequest" },
+              "example": { "open_ids": ["ou_abc", "ou_def"] }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "成功（code=200）或业务错误。可能错误码：\n- 4007 user_not_found（某个 open_id 在 workspace 中无对应用户）\n- 4031 ws_group_not_found\n- 4084 invalid_open_api_user_id",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/EmptyDataResponse" } } }
+          },
+          "401": {
+            "description": "认证失败（4084）",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/UnauthorizedResponse" } } }
+          },
+          "400": {
+            "description": "DRF 字段校验失败（HTTP 400，body.code=400 validation_error）。可能场景：open_ids 缺失 / 为空数组 / 含空字符串。",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ValidationErrorResponse" } } }
+          }
+        }
+      }
+    },
+    "/ws-groups/{ws_group_id}/members/{open_id}": {
+      "parameters": [
+        { "name": "ws_group_id", "in": "path", "required": true, "schema": { "type": "integer" }, "description": "角色 id" },
+        { "name": "open_id", "in": "path", "required": true, "schema": { "type": "string" }, "description": "成员 open_id" }
+      ],
+      "delete": {
+        "tags": ["角色管理"],
+        "summary": "移除单个成员",
+        "description": "从角色中移除一个成员。",
+        "operationId": "removeWsGroupMember",
+        "responses": {
+          "200": {
+            "description": "成功（code=200）或业务错误。可能错误码：\n- 4007 user_not_found（open_id 无对应用户）\n- 4031 ws_group_not_found\n- 4084 invalid_open_api_user_id",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/EmptyDataResponse" } } }
+          },
+          "401": {
+            "description": "认证失败（4084）",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/UnauthorizedResponse" } } }
+          }
+        }
+      }
+    }
+  }
+}

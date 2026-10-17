@@ -8,6 +8,46 @@ from ..client import EmooClient
 from ..formatters import output, success, _progress
 
 
+def _split_str(value: str | None) -> list[str]:
+    return [v.strip() for v in (value or "").split(",") if v.strip()]
+
+
+def _split_int(value: str | None) -> list[int]:
+    return [int(v.strip()) for v in (value or "").split(",") if v.strip()]
+
+
+def _data_auth_config(ws_app_keys: str | None, doc_group_ids: str | None,
+                      doc_ids: str | None) -> dict | None:
+    config: dict = {}
+    if ws_app_keys:
+        config["ws_app_keys"] = _split_str(ws_app_keys)
+    if doc_group_ids:
+        config["doc_group_ids"] = _split_int(doc_group_ids)
+    if doc_ids:
+        config["doc_ids"] = _split_int(doc_ids)
+    return config or None
+
+
+def _apply_data_auth(body: dict, data_auth: str | None, ws_app_keys: str | None,
+                     doc_group_ids: str | None, doc_ids: str | None) -> None:
+    config = _data_auth_config(ws_app_keys, doc_group_ids, doc_ids)
+    if data_auth == "all":
+        if config:
+            raise click.BadParameter("data_auth=all 时不能传 --ws-app-keys/--doc-group-ids/--doc-ids")
+        body["data_auth"] = "all"
+        return
+    if config and not data_auth:
+        raise click.BadParameter("传 data_auth_config 时必须同时指定 --data-auth")
+    if data_auth:
+        body["data_auth"] = data_auth
+        if data_auth != "all":
+            if not config:
+                raise click.BadParameter(
+                    "data_auth 非 all 时需要至少一个 --ws-app-keys/--doc-group-ids/--doc-ids"
+                )
+            body["data_auth_config"] = config
+
+
 @click.group("agent", help="Agent 管理 (第三方集成)")
 def agent_group() -> None:
     pass
@@ -49,6 +89,7 @@ def agent_list(ctx: click.Context, page_size: int, current_page: int, agent_type
     table.add_column("启用")
     table.add_column("描述")
     table.add_column("scope")
+    table.add_column("data_auth")
     table.add_column("创建时间")
 
     for a in results:
@@ -59,6 +100,7 @@ def agent_list(ctx: click.Context, page_size: int, current_page: int, agent_type
             "✅" if a.get("is_enabled") else "❌",
             (a.get("description") or ""),
             a.get("scope", ""),
+            a.get("data_auth") or "all",
             a.get("created_at", ""),
         )
 
@@ -78,11 +120,18 @@ def agent_list(ctx: click.Context, page_size: int, current_page: int, agent_type
               help="可见范围: public / specified_ws_groups")
 @click.option("--group-ids", "group_ids", default=None, type=str,
               help="scope=specified_ws_groups 时的角色 ID，逗号分隔")
+@click.option("--data-auth", "data_auth",
+              type=click.Choice(["all", "include_specified_data", "exclude_specified_data"]),
+              default=None, help="数据源权限模式 (默认 all)")
+@click.option("--ws-app-keys", default=None, help="data_auth 指定数据源 key，逗号分隔")
+@click.option("--doc-group-ids", default=None, help="data_auth 指定文档组 id，逗号分隔")
+@click.option("--doc-ids", default=None, help="data_auth 指定文档 id，逗号分隔")
 @click.option("--dry-run", is_flag=True, help="预览请求，不实际执行")
 @click.pass_context
 def agent_create(ctx: click.Context, title: str, agent_type: str, config_json: str,
                  description: str | None, disabled: bool, scope: str,
-                 group_ids: str | None, dry_run: bool) -> None:
+                 group_ids: str | None, data_auth: str | None, ws_app_keys: str | None,
+                 doc_group_ids: str | None, doc_ids: str | None, dry_run: bool) -> None:
     """创建 Agent。"""
     import json as _json
     config = _json.loads(config_json)
@@ -99,6 +148,7 @@ def agent_create(ctx: click.Context, title: str, agent_type: str, config_json: s
         body["scope"] = scope
     if group_ids:
         body["specified_ws_group_ids"] = [int(g.strip()) for g in group_ids.split(",")]
+    _apply_data_auth(body, data_auth, ws_app_keys, doc_group_ids, doc_ids)
 
     if dry_run:
         click.echo(f"DRY-RUN POST /agents")
@@ -141,11 +191,18 @@ def agent_get(ctx: click.Context, ws_agent_key: str) -> None:
 @click.option("--enabled/--disabled", "is_enabled", default=None, help="启用/禁用")
 @click.option("--scope", "scope", default=None, type=str, help="可见范围: public / specified_ws_groups")
 @click.option("--group-ids", "group_ids", default=None, type=str, help="scope=specified_ws_groups 时的角色 ID，逗号分隔")
+@click.option("--data-auth", "data_auth",
+              type=click.Choice(["all", "include_specified_data", "exclude_specified_data"]),
+              default=None, help="数据源权限模式；传 all 会清除既有数据绑定")
+@click.option("--ws-app-keys", default=None, help="data_auth 指定数据源 key，逗号分隔")
+@click.option("--doc-group-ids", default=None, help="data_auth 指定文档组 id，逗号分隔")
+@click.option("--doc-ids", default=None, help="data_auth 指定文档 id，逗号分隔")
 @click.option("--dry-run", is_flag=True)
 @click.pass_context
 def agent_update(ctx: click.Context, ws_agent_key: str, title: str | None, config_json: str | None,
                  description: str | None, is_enabled: bool | None, scope: str | None,
-                 group_ids: str | None, dry_run: bool) -> None:
+                 group_ids: str | None, data_auth: str | None, ws_app_keys: str | None,
+                 doc_group_ids: str | None, doc_ids: str | None, dry_run: bool) -> None:
     """部分更新 Agent — 仅传需要修改的字段。"""
     import json as _json
     body: dict = {}
@@ -161,6 +218,7 @@ def agent_update(ctx: click.Context, ws_agent_key: str, title: str | None, confi
         body["scope"] = scope
     if group_ids is not None:
         body["specified_ws_group_ids"] = [int(g.strip()) for g in group_ids.split(",")]
+    _apply_data_auth(body, data_auth, ws_app_keys, doc_group_ids, doc_ids)
 
     if not body:
         click.echo("⚠ 未指定任何要更新的字段")

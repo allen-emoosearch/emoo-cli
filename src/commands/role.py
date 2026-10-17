@@ -179,3 +179,47 @@ def role_members_remove(ctx: click.Context, role_id: int, open_id: str,
     client = EmooClient(base_url=ctx.obj.get("base_url"), user_id=ctx.obj.get("user_id"))
     resp = client.request("DELETE", f"/ws-groups/{role_id}/members/{open_id}")
     success(resp, as_json=ctx.obj.get("as_json", False))
+
+
+@role_group.command("batch-get")
+@click.argument("role_ids", type=int, nargs=-1)
+@click.option("--file", "-f", "from_file", default=None,
+              help="从文件读取角色 id (每行一个，或 JSON 数组)")
+@click.pass_context
+def role_batch_get(ctx: click.Context, role_ids: tuple[int, ...],
+                   from_file: str | None) -> None:
+    """批量按 id 查询角色 (≤100，按请求顺序返回，缺失项静默省略)。"""
+    ids = list(role_ids)
+    if from_file:
+        with open(from_file, encoding="utf-8") as f:
+            text = f.read().strip()
+        if text.startswith("["):
+            import json
+            ids.extend(json.loads(text))
+        else:
+            ids.extend(int(line.strip()) for line in text.splitlines() if line.strip())
+    ids = [int(i) for i in dict.fromkeys(int(i) for i in ids)]
+    if not ids:
+        raise click.BadParameter("未指定角色 id")
+    if len(ids) > 100:
+        raise click.BadParameter(f"角色 id 最多 100 个，当前 {len(ids)}")
+
+    client = EmooClient(base_url=ctx.obj.get("base_url"), user_id=ctx.obj.get("user_id"))
+    resp = client.request("POST", "/ws-groups/batch-get", body={"ws_group_ids": ids})
+    output(resp, as_json=ctx.obj.get("as_json", False),
+           columns=["id", "group_name", "group_desc", "created_at"])
+
+
+@role_group.command("members-list")
+@click.argument("role_id", type=int)
+@click.option("--page-size", default=50, type=int, help="每页数量")
+@click.option("--current-page", default=1, type=int, help="页码")
+@click.pass_context
+def role_members_list(ctx: click.Context, role_id: int, page_size: int,
+                      current_page: int) -> None:
+    """分页查询角色成员列表。"""
+    client = EmooClient(base_url=ctx.obj.get("base_url"), user_id=ctx.obj.get("user_id"))
+    resp = client.request("GET", f"/ws-groups/{role_id}/members",
+                          params={"page_size": page_size, "current_page": current_page})
+    output(resp, as_json=ctx.obj.get("as_json", False),
+           columns=["open_id", "ws_username", "email", "mobile_num", "is_active"])

@@ -8,7 +8,7 @@
 - **stdout=数据, stderr=进度/错误**: `--json` 模式下绝不混入 — 所有进度消息用 `_progress()` 写 stderr
 - **错误必须结构化**: 每条错误继承 `EmooError`，带 `hint` 字段告诉调用者怎么修
 - **先查再调**: 用 `emoo schema <endpoint>` 查参数，不要猜字段
-- **副作用可预览**: `--dry-run` 在 chat send / message push / base write / api POST
+- **副作用可预览**: `--dry-run` 在 chat send / message push/batch/status / todo write / base write / file write / api POST
 
 ## 代码风格
 
@@ -22,14 +22,18 @@ src/
     auth.py                 # login / status / set-default-user-id
     api.py                  # L3 透传: GET/POST/PUT/DELETE，body 支持 string/file/stdin
     schema_cmd.py           # schema 自省: list + 端点详情 + 模糊匹配
-    endpoints.json          # 16 端点 schema (method, path, params, body, response)
-    data.py                 # search + get
-    chat.py                 # list / create / send (--dry-run)
-    message.py              # push (--dry-run)
-    contact.py              # list / update
+    endpoints.json          # 73 端点 schema，由 scripts/sync_api_docs.py 生成
+    data.py                 # search / get / aggregate
+    chat.py                 # list / create / send / agent-send
+    message.py              # push / batch / status / status-query
+    contact.py              # list / update / batch-get
+    work_item.py            # todo list/create/update/delete + tag-* (9 commands)
+    shortcut.py             # shortcut list/create/update/delete/reorder
     app.py                  # overview / list / doc-groups (overview 支持 --json)
     skill.py                # init/list/show/run/create/register + pipeline 子组
-    base_cmd.py             # record-create/update/batch-update/delete/list
+    base.py                 # record/table/column/permission CRUD (17 commands)
+    agent.py / role.py      # Agent + 角色/成员/批量查询
+    folder.py / file.py     # folder + 文件上传/知识库文件/权限/解析
   skills/
     loader.py               # MD skill 解析 (YAML frontmatter)
     runner.py               # Skill 执行 (模板→app 匹配→搜索→CSV)
@@ -43,7 +47,7 @@ src/
 
 - **安装模式**: 非 editable 安装，改源码后必须 `pip install --force-reinstall .`
 - **错误处理**: 使用 `from_api_response()` 构建错误，AI Agent 依赖 `hint` 字段自愈
-- **API 端点**: 文档在 `EMOO_OpenAPI_Documentation.md`，schema 在 `src/commands/endpoints.json`
+- **API 端点**: 远端文档源为 `https://open.emooai.com/llms.txt`；运行 `python scripts/sync_api_docs.py` 重新生成 `docs/openapi.json` + `src/commands/endpoints.json`。不要手改 endpoints.json
 - **进度消息**: 所有进度/信息类消息必须通过 `_progress()` 写 stderr，不能直接 `click.echo()`
 - **JSON 模式**: 每个命令必须检查 `ctx.obj.get("as_json")`，输出结构化 JSON 到 stdout
 
@@ -57,4 +61,4 @@ src/
 
 - 格式: `type: 中文描述`
 - 类型: feat, fix, docs, refactor
-- Co-Authored-By: Claude Opus 4.7 <noreply@anthropic.com>
+- Co-Authored-By: Claude Code <noreply@anthropic.com>

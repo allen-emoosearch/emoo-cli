@@ -40,6 +40,7 @@ emoo skill pipeline knowledge-map --auto --ttl 24h
 | 🗨️ 聊天/群消息 | `emoo skill pipeline analyze` |
 | 📄 文档/知识库 | `emoo data search` (需带 filter) |
 | 📊 结构化表格 | `emoo base record-list` |
+| 📈 聚合统计 | `emoo data aggregate` (count/sum/avg/min/max/values) |
 | 📦 大量拉取 | `emoo data get` (无500上限) |
 
 ---
@@ -96,6 +97,20 @@ emoo --json skill pipeline analyze "近一个月发货"
 emoo data search -k "关键词" -f '{"field":"ws_app.ws_app_key","operator":"eq","value":"<key>"}'
 emoo data search -k "关键词" --max-results 500
 # ⚠️ 硬上限500, 超过用 data get
+```
+
+---
+
+## 四·五、聚合统计 `data aggregate`
+
+```bash
+emoo data aggregate -m count                               # 总量
+emoo data aggregate -m sum --field 合同金额                # 金额合计
+emoo data aggregate -m count --group-by 部门               # 分组
+emoo data aggregate -m count --group-by 签约日 --interval month   # 月度趋势
+emoo data aggregate -m values --field 工号                 # 枚举值
+# 过滤条件格式同 data search (-f)
+# 服务端聚合，避免拉全量文档；hard cap: 50 组 / 200 值
 ```
 
 ---
